@@ -1,0 +1,54 @@
+Metadata:
+  AWS::ServerlessRepo::Application:
+    Name: SolarWinds-Observability-Logs
+    Description: Send CloudWatch Logs to OTEL Collector endpoint (otlp/GRPc)
+    Author: SolarWinds
+    SpdxLicenseId: MIT
+    LicenseUrl: LICENSE.txt
+    ReadmeUrl: README.md
+    Labels: ['CloudWatch', 'Logs', 'AWS', 'Observability', 'OTEL'] 
+    HomePageUrl: http://www.solarwinds.com
+    SemanticVersion: 0.0.1
+    SourceCodeUrl: https://github.com/solarwinds/cloud-observability-integration/tree/master/aws/logs
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Send CloudWatch Logs to OTEL Collector endpoint (otlp/GRPc)
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Timeout: 5
+
+Parameters:
+  OtlpEndpoint:
+    Type: String
+    Default: otel-collector.dc-01.cloud.solarwinds.com:443
+  ApiToken:
+    Type: String
+    Default: ''
+
+Resources:
+  SendLogsFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: send-logs/
+      Handler: main
+      Runtime: go1.x
+      Architectures:
+        - x86_64
+      Tracing: Active # https://docs.aws.amazon.com/lambda/latest/dg/lambda-x-ray.html
+      Environment:
+        Variables:
+          USE_ENCRYPTION: "no"
+          OTLP_ENDPOINT: !Sub '${OtlpEndpoint}'
+          API_TOKEN: !Sub '${ApiToken}'
+
+Outputs:
+  SendLogsFunction:
+    Description: " SolarWinds Observability Logs function ARN"
+    Value: !GetAtt SendLogsFunction.Arn
+  SendLogsFunctionIamRole:
+    Description: "Implicit IAM Role created for SolarWinds Observability Logs function"
+    Value: !GetAtt SendLogsFunction.Arn

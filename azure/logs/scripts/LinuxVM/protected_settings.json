@@ -1,0 +1,13 @@
+{
+  "storageAccountName": "__DIAGNOSTIC_STORAGE_ACCOUNT__",
+  "storageAccountSasToken": "__SAS_TOKEN__",
+  "sinksConfig": {
+    "sink": [
+      {
+        "name": "SyslogEventHub",
+        "type": "EventHub",
+        "sasURL": "__SAS_URL__"
+      }
+    ]
+  }
+}

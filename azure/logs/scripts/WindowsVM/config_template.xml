@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<DiagnosticsConfiguration  xmlns="http://schemas.microsoft.com/ServiceHosting/2010/10/DiagnosticsConfiguration">
+  <PublicConfig xmlns="http://schemas.microsoft.com/ServiceHosting/2010/10/DiagnosticsConfiguration">
+  <WadCfg>
+    <DiagnosticMonitorConfiguration overallQuotaInMB="4096">
+      <DiagnosticInfrastructureLogs scheduledTransferLogLevelFilter="Error"/>
+      <Metrics resourceId="__VM_RESOURCE_ID__" >
+        <MetricAggregation scheduledTransferPeriod="PT1H"/>
+        <MetricAggregation scheduledTransferPeriod="PT1M"/>
+      </Metrics>
+      <WindowsEventLog scheduledTransferPeriod="PT1M" sinks="EventHub">
+        <DataSource name="Application!*[System[(Level = 1 or Level = 2 or Level = 3 or Level = 4)]]"/>
+        <DataSource name="Security!*[System[(Level = 1 or Level = 2 or Level = 3 or Level = 4)]"/>
+        <DataSource name="System!*[System[(Level = 1 or Level = 2 or Level = 3 or Level = 4)]]"/>
+      </WindowsEventLog>
+    </DiagnosticMonitorConfiguration>
+    <SinksConfig>
+      <Sink name="EventHub">
+        <EventHub Url="__EVENT_HUB_URL__" SharedAccessKeyName="__EVENT_HUB_ACCESS_POLICY_NAME__" usePublisherId="false" />
+      </Sink>
+    </SinksConfig>
+
+  </WadCfg>
+  <StorageAccount>__DIAGNOSTIC_STORAGE_ACCOUNT_NAME__</StorageAccount>
+</PublicConfig>
+  <PrivateConfig>
+    <StorageAccount name="__DIAGNOSTIC_STORAGE_ACCOUNT_NAME__" key="__DIAGNOSTIC_STORAGE_ACCOUNT_KEY__" />
+    <EventHub Url="__EVENT_HUB_URL__" SharedAccessKeyName="__EVENT_HUB_ACCESS_POLICY_NAME__" SharedAccessKey="__EVENT_HUB_ACCESS_POLICY_KEY__" />
+  </PrivateConfig>
+  <IsEnabled>true</IsEnabled>
+</DiagnosticsConfiguration>
