@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"os"
 	"send-logs/logger"
 	"strings"
 
 	"encoding/base64"
+	"encoding/json"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
@@ -33,6 +35,7 @@ const (
 )
 
 var (
+	runningTests = false
 	functionName string = os.Getenv(awsLambdaFunctionNameVar)
 	executingInAWS bool = strings.Contains(os.Getenv(awsExecutionEnvVar), "AWS_Lambda_") 
 	useEncryption = executingInAWS && strings.EqualFold(os.Getenv(useEncryptionVar), "yes")
@@ -42,7 +45,32 @@ var (
 	kmsClient *kms.KMS
 )
 
+type cloudTrailEvent struct {
+	EventSource string `json:"eventSource"`
+	EventName string `json:"eventName"`
+}
+
+type ec2InstanceParameter struct {
+	InstanceId string `json:instanceId`
+}
+type ec2InstancesSetItems struct {
+	Items [] ec2InstanceParameter `json:items`
+}
+
+type ec2InstancesSet struct {
+	InstancesSet ec2InstancesSetItems `json:instancesSet`
+}
+type ec2CloudTrailEvent struct {
+	cloudTrailEvent
+	RequestParameters ec2InstancesSet `json:requestParameters`
+	ResponseElements ec2InstancesSet `json:responseElements`
+}
+
 func init() {
+
+	if runningTests {
+		return
+	}
 
 	if endpoint == "" || apiToken == "" {
 		appLogger.Fatal(fmt.Sprintf("Function execution parameters are not configured. Please set and encrypt %s and %s environmet variables", otlpEndpointVar, apiTokenVar))
@@ -79,6 +107,23 @@ func decodeString(encrypted string) string {
 	return string(response.Plaintext[:])
 }
 
+func extractEC2InstanceId(ec2Event * ec2CloudTrailEvent) (instanceId string, err error) {
+	if len(ec2Event.RequestParameters.InstancesSet.Items) > 0 {
+		instanceId = ec2Event.RequestParameters.InstancesSet.Items[0].InstanceId
+		if instanceId != "" {
+			return
+		}
+	}
+
+	if len(ec2Event.ResponseElements.InstancesSet.Items) > 0 {
+		instanceId = ec2Event.ResponseElements.InstancesSet.Items[0].InstanceId
+		if instanceId != "" {
+			return
+		}
+	}
+	err = errors.New("Instance Id is not present")
+	return
+} 
 
 func handleEvent(ctx context.Context, event events.CloudwatchLogsEvent) (r string, err error) {
 	r = "failure"
@@ -127,6 +172,22 @@ func handleEvent(ctx context.Context, event events.CloudwatchLogsEvent) (r strin
 		logEntry.SetName(item.ID)
 		logEntry.SetTimestamp(pdata.Timestamp(item.Timestamp * timestampMultiplier))
 		logEntry.Body().SetStringVal(item.Message)
+
+		// check if message comes from EC2 CloudTrail
+
+		if strings.Contains(item.Message, "ec2.amazonaws.com") && strings.Contains(item.Message, "instancesSet") {
+			// parse message as json event object
+
+			ec2Event := ec2CloudTrailEvent {}
+			err = json.Unmarshal([]byte(item.Message), &ec2Event)
+			if err == nil {
+				instanceId, err := extractEC2InstanceId(&ec2Event)
+				if err == nil {
+					attrs.UpsertString(semconv.AttributeHostID, instanceId)
+					attrs.UpsertString(semconv.AttributeCloudPlatform, semconv.AttributeCloudPlatformAWSEC2)
+				}
+			}
+		}
 	}
 	
 	logRequest := otlpgrpc.NewLogsRequest()

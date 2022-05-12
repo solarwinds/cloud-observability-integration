@@ -1,0 +1,29 @@
+{
+    "eventVersion": "1.08",
+    "userIdentity": {},
+    "eventTime": "2022-04-26T12:56:56Z",
+    "eventSource": "ec2.amazonaws.com",
+    "eventName": "DescribeInstances",
+    "awsRegion": "us-east-1",
+    "sourceIPAddress": "AWS Internal",
+    "userAgent": "AWS Internal",
+    "requestParameters": {
+        "instancesSet": {
+            "items": [
+                {
+                    "instanceId": "i-061bf37e959383a04"
+                }
+            ]
+        },
+        "filterSet": {}
+    },
+    "responseElements": null,
+    "requestID": "bf3cc8a0-dff9-4fd0-a823-5786d4a3fd39",
+    "eventID": "17a3c423-e2ed-419c-a080-435c38504c16",
+    "readOnly": true,
+    "eventType": "AwsApiCall",
+    "managementEvent": true,
+    "recipientAccountId": "285904167645",
+    "eventCategory": "Management",
+    "sessionCredentialFromConsole": "true"
+}

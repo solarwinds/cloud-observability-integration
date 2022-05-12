@@ -1,0 +1,54 @@
+{
+    "eventVersion": "1.08",
+    "userIdentity": {},
+    "eventTime": "2022-04-26T12:56:53Z",
+    "eventSource": "ec2.amazonaws.com",
+    "eventName": "RunInstances",
+    "awsRegion": "us-east-1",
+    "sourceIPAddress": "AWS Internal",
+    "userAgent": "AWS Internal",
+    "requestParameters": {
+        "instancesSet": {
+            "items": [
+                {
+                    "imageId": "ami-0f9fc25dd2506cf6d",
+                    "minCount": 1,
+                    "maxCount": 1
+                }
+            ]
+        },
+        "instanceType": "t2.micro",
+        "blockDeviceMapping": {},
+        "monitoring": {
+            "enabled": false
+        },
+        "disableApiTermination": false,
+        "disableApiStop": false        
+    },
+    "responseElements": {
+        "requestId": "eb8a1af7-e68e-4b3f-8c5b-f9f29250c177",
+        "reservationId": "r-062b9bc5c7481d8e4",
+        "ownerId": "",
+        "groupSet": {},
+        "instancesSet": {
+            "items": [
+                {
+                    "instanceId": "i-061bf37e959383a04",
+                    "imageId": "ami-0f9fc25dd2506cf6d",
+                    "instanceState": {
+                        "code": 0,
+                        "name": "pending"
+                    }
+                }
+            ]
+        }
+    },
+    "requestID": "eb8a1af7-e68e-4b3f-8c5b-f9f29250c177",
+    "eventID": "044749bb-b98d-4841-bd98-4bb853517b3b",
+    "readOnly": false,
+    "eventType": "AwsApiCall",
+    "managementEvent": true,
+    "recipientAccountId": "285904167645",
+    "eventCategory": "Management",
+    "sessionCredentialFromConsole": "true"
+}
