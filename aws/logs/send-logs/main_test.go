@@ -4,7 +4,12 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
+	"time"
+
+	"github.com/aws/aws-lambda-go/events"
 	assert "github.com/stretchr/testify/assert"
+	"go.opentelemetry.io/collector/model/pdata"
+	semconv "go.opentelemetry.io/collector/model/semconv/v1.5.0"
 )
 
 var _= (func() interface {} {
@@ -67,4 +72,106 @@ func TestCloudTrailEventParsing(t *testing.T) {
 	}
 
 	t.Log("TestCloudTrailEventParsing")
+}
+
+func TestLogEventsTransform(t *testing.T) {
+	logEvents := make([] events.CloudwatchLogsLogEvent, 0)
+
+	logEvents = append(logEvents, events.CloudwatchLogsLogEvent{
+		ID:        "1",
+		Timestamp: time.Now().Unix(),
+		Message:   "Hello, World",
+	})
+
+	logEvents = append(logEvents,createCloudTrailCloudWatchEvent("1","testEvent", "i-12345678"))
+	logEvents = append(logEvents,createCloudTrailCloudWatchEvent("1","testEvent", "another ec2 instance"))
+	logEvents = append(logEvents, events.CloudwatchLogsLogEvent{
+		ID:        "1",
+		Timestamp: time.Now().Unix(),
+		Message:   "World, hello again",
+	})
+
+	output := make(chan pdata.Logs)
+
+	go transformLogEvents("test account", "test log group", "i-12345678", logEvents, output)
+	
+	testCases := [] struct {
+		name string
+		action func(t *testing.T, logs pdata.Logs)
+	}   {
+			{
+				name : "Same host id logs are merged",
+				action : func(t *testing.T, logs pdata.Logs) {
+					resLogs := logs.ResourceLogs()
+					assert.Equal(t, 1, resLogs.Len())
+					log := resLogs.At(0)
+					assert.Equal(t, 1, log.InstrumentationLibraryLogs().Len())
+					instrLog := log.InstrumentationLibraryLogs().At(0)
+					assert.Equal(t, 2, instrLog.Logs().Len()) 
+				},
+			},
+			{
+				name : "Another host id produces new logs",
+				action : func(t *testing.T, logs pdata.Logs) {
+					resLogs := logs.ResourceLogs()
+					assert.Equal(t, 1, resLogs.Len())
+					log := resLogs.At(0)
+					assert.Equal(t, 1, log.InstrumentationLibraryLogs().Len())
+					instrLog := log.InstrumentationLibraryLogs().At(0)
+					assert.Equal(t, 1, instrLog.Logs().Len()) 
+				},
+			},
+			{
+				name : "Log event without host id produces new logs",
+				action : func(t *testing.T, logs pdata.Logs) {
+					resLogs := logs.ResourceLogs()
+				
+					assert.Equal(t, 1, resLogs.Len())
+					log := resLogs.At(0)
+					assert.Equal(t, 1, log.InstrumentationLibraryLogs().Len())
+					instrLog := log.InstrumentationLibraryLogs().At(0)
+					assert.Equal(t, 1, instrLog.Logs().Len()) 
+					attrs := log.Resource().Attributes().AsRaw()
+					hostId, _ := attrs[semconv.AttributeHostID]
+					assert.Equal(t, "i-12345678", hostId)
+				},
+			},
+	}
+	testCaseIndex := 0
+	for log := range output {
+		assert.Less(t, testCaseIndex, len(testCases))
+		tc := testCases[testCaseIndex]
+		t.Run(tc.name, func(t *testing.T) {
+			tc.action(t, log)
+		})
+
+		testCaseIndex += 1
+	}
+}
+
+func createCloudTrailCloudWatchEvent(logItemId, eventName, instanceId string) (evt events.CloudwatchLogsLogEvent) {
+	ec2 := ec2CloudTrailEvent{
+		cloudTrailEvent:   cloudTrailEvent{
+			EventSource: "ec2.amazonaws.com",
+			EventName:   eventName,
+		},
+		RequestParameters: ec2InstancesSet{
+			InstancesSet: ec2InstancesSetItems{
+				Items: []ec2InstanceParameter{
+					{
+						InstanceId: instanceId,
+					},
+				},
+			},
+		},
+		ResponseElements:  ec2InstancesSet{},
+	}
+
+	msg, _:= json.Marshal(ec2)
+	evt = events.CloudwatchLogsLogEvent{
+		ID:        logItemId,
+		Timestamp: time.Now().Unix(),
+		Message:   string(msg),
+	}
+	return 
 }
