@@ -19,7 +19,6 @@ import (
 	"github.com/aws/aws-sdk-go/service/kms"
 	"go.opentelemetry.io/collector/model/otlpgrpc"
 	"go.opentelemetry.io/collector/model/pdata"
-	semconv "go.opentelemetry.io/collector/model/semconv/v1.5.0"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
@@ -51,19 +50,19 @@ type cloudTrailEvent struct {
 }
 
 type ec2InstanceParameter struct {
-	InstanceId string `json:instanceId`
+	InstanceId string `json:"instanceId"`
 }
 type ec2InstancesSetItems struct {
-	Items [] ec2InstanceParameter `json:items`
+	Items [] ec2InstanceParameter `json:"items"`
 }
 
 type ec2InstancesSet struct {
-	InstancesSet ec2InstancesSetItems `json:instancesSet`
+	InstancesSet ec2InstancesSetItems `json:"instancesSet"`
 }
 type ec2CloudTrailEvent struct {
 	cloudTrailEvent
-	RequestParameters ec2InstancesSet `json:requestParameters`
-	ResponseElements ec2InstancesSet `json:responseElements`
+	RequestParameters ec2InstancesSet `json:"requestParameters"`
+	ResponseElements ec2InstancesSet `json:"responseElements"`
 }
 
 func init() {
@@ -142,68 +141,99 @@ func handleEvent(ctx context.Context, event events.CloudwatchLogsEvent) (r strin
 	
 	conn, err := grpc.Dial(endpoint, dialOption)
 	
-	defer conn.Close()
-
 	if err != nil {
 		appLogger.Error("While connecting to otlp/gRPC endpoint: ", err.Error())
 		return r, err
 	}
 
+	defer conn.Close()
+
 	logsClient := otlpgrpc.NewLogsClient(conn)
-	logsData := pdata.NewLogs()
-	resLog := logsData.ResourceLogs().AppendEmpty()
-	resLog.SetSchemaUrl(semconv.SchemaURL)
-	resource := resLog.Resource()
-	attrs := resource.Attributes()
-	attrs.InsertString(semconv.AttributeCloudProvider, semconv.AttributeCloudProviderAWS)
-	attrs.InsertString(semconv.AttributeCloudAccountID, datareq.Owner)
-	attrs.InsertString(semconv.AttributeAWSLogGroupNames, datareq.LogGroup)
-	attrs.InsertString(semconv.AttributeAWSLogStreamNames, datareq.LogStream)
-	if strings.HasPrefix( datareq.LogStream, "i-") {
-		// assume this log stream belongs to EC2 instance
-		appLogger.Info(fmt.Sprintf("Assuming log belongs to '%s' EC2 instance", datareq.LogStream))
-		attrs.InsertString(semconv.AttributeHostID, datareq.LogStream)
-		attrs.InsertString(semconv.AttributeCloudPlatform, semconv.AttributeCloudPlatformAWSEC2)
-	}
-	instrLog := resLog.InstrumentationLibraryLogs().AppendEmpty()
+	logsChan := make(chan pdata.Logs)
+	go transformLogEvents(datareq.Owner, datareq.LogGroup, datareq.LogStream, datareq.LogEvents, logsChan)
+
+	errs := make([] error, 0)
+	ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer " + apiToken)
 	
-	for _, item := range datareq.LogEvents {
-		logEntry := instrLog.Logs().AppendEmpty()
-		logEntry.SetName(item.ID)
-		logEntry.SetTimestamp(pdata.Timestamp(item.Timestamp * timestampMultiplier))
-		logEntry.Body().SetStringVal(item.Message)
+	for logsData := range logsChan  {
+		logRequest := otlpgrpc.NewLogsRequest()
+		logRequest.SetLogs(logsData)
+		_, err = logsClient.Export(ctx, logRequest)
+		if err != nil {
+			appLogger.Error("While exporting log data: ", err.Error())
+			errs = append(errs, err)
+		}
+	}
+	if len(errs) == 0 {
+		r = "success"
+	} else {
+		err = errs[len(errs)-1]
+	}
+	appLogger.Info("Function execution result: ", r)
 
+	return r, err
+}
+
+func transformLogEvents(account, logGroup, logStream string, input [] events.CloudwatchLogsLogEvent, output chan pdata.Logs) {
+	defer close(output)
+	reqBuilder := NewOtlpRequestBuilder().
+		SetCloudAccount(account).
+		SetLogGroup(logGroup).
+		SetLogStream(logStream)
+
+	for _, item := range input {
+
+		// normalize timestamp to be accepted by OTEL
+		timestamp := item.Timestamp * timestampMultiplier
+		
 		// check if message comes from EC2 CloudTrail
-
 		if strings.Contains(item.Message, "ec2.amazonaws.com") && strings.Contains(item.Message, "instancesSet") {
 			// parse message as json event object
 
 			ec2Event := ec2CloudTrailEvent {}
-			err = json.Unmarshal([]byte(item.Message), &ec2Event)
+			err := json.Unmarshal([]byte(item.Message), &ec2Event)
+
+
 			if err == nil {
 				instanceId, err := extractEC2InstanceId(&ec2Event)
 				if err == nil {
-					attrs.UpsertString(semconv.AttributeHostID, instanceId)
-					attrs.UpsertString(semconv.AttributeCloudPlatform, semconv.AttributeCloudPlatformAWSEC2)
+					if !reqBuilder.HasHostId() {
+						reqBuilder.SetHostId(instanceId)
+						reqBuilder.AddLogEntry(item.ID, timestamp, item.Message)
+						continue
+					}
+					if !reqBuilder.MatchHostId(instanceId) {
+						output <- reqBuilder.GetLogs()
+						reqBuilder = NewOtlpRequestBuilder().
+							SetCloudAccount(account).
+							SetLogGroup(logGroup).
+							SetLogStream(logStream).
+							SetHostId(instanceId).
+							AddLogEntry(item.ID, timestamp, item.Message)
+						continue
+					}
 				}
 			}
 		}
-	}
-	
-	logRequest := otlpgrpc.NewLogsRequest()
-	logRequest.SetLogs(logsData)
 
-	ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer " + apiToken)
-	_, err = logsClient.Export(ctx, logRequest)
-	
-	if err != nil {
-		appLogger.Error("While exporting log data: ", err.Error())
-		return r, err
+		if reqBuilder.HasHostId() && !reqBuilder.MatchHostId(logStream) {
+			output <- reqBuilder.GetLogs()
+			reqBuilder = NewOtlpRequestBuilder().
+				SetCloudAccount(account).
+				SetLogGroup(logGroup).
+				SetLogStream(logStream).
+				AddLogEntry(item.ID, item.Timestamp * timestampMultiplier, item.Message)
+				continue
+
+		}
+
+		reqBuilder.AddLogEntry(item.ID, timestamp, item.Message)
 	}
 
-	r = "success"
-	appLogger.Info("Function execution result: ", r)
-	return r, nil
+	logs := reqBuilder.GetLogs()
+	if logs.ResourceLogs().Len() >= 0 {
+		output <- logs
+	}
 }
 
 func main() {
