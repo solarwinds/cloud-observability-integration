@@ -1,0 +1,7 @@
+{
+    "host": "ip-test",
+    "ident": "kubelet",
+    "message": "I0607 10:45:54.010742    3024 kubelet.go:2094] \"SyncLoop (PLEG): event for pod\" pod=\"default/test\" event=&{ID:test Type:ContainerDied Data:test}",
+    "az": "test",
+    "ec2_instance_id": "i-test"
+}
