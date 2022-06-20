@@ -44,6 +44,13 @@ var (
 	kmsClient *kms.KMS
 )
 
+type MessageKind int
+
+const (
+	Default MessageKind = iota
+	CloudTrailEC2
+)
+
 type cloudTrailEvent struct {
 	EventSource string `json:"eventSource"`
 	EventName string `json:"eventName"`
@@ -63,6 +70,27 @@ type ec2CloudTrailEvent struct {
 	cloudTrailEvent
 	RequestParameters ec2InstancesSet `json:"requestParameters"`
 	ResponseElements ec2InstancesSet `json:"responseElements"`
+}
+
+type cloudInsightsLog struct {
+	Ec2InstanceId string `json:"ec2_instance_id"`  
+}
+
+type cloudInsightsAppLogKubernetes struct {
+	Host string `json:"host"`
+}
+
+type cloudInsightsAppLog struct {
+	Kubernetes cloudInsightsAppLogKubernetes `json:"kubernetes"`
+}
+
+type cloudInsightsPerformance struct {
+	InstanceId string `json:"InstanceId"`
+}
+
+
+type iEc2Event interface {
+	getInstanceId() (string, error)
 }
 
 func init() {
@@ -186,44 +214,37 @@ func transformLogEvents(account, logGroup, logStream string, input [] events.Clo
 		// normalize timestamp to be accepted by OTEL
 		timestamp := item.Timestamp * timestampMultiplier
 		
-		// check if message comes from EC2 CloudTrail
-		if strings.Contains(item.Message, "ec2.amazonaws.com") && strings.Contains(item.Message, "instancesSet") {
-			// parse message as json event object
+		ok, ec2Event := parseMessage(item.Message)
 
-			ec2Event := ec2CloudTrailEvent {}
-			err := json.Unmarshal([]byte(item.Message), &ec2Event)
-
-
+		if ok {
+			instanceId, err := ec2Event.getInstanceId()
 			if err == nil {
-				instanceId, err := extractEC2InstanceId(&ec2Event)
-				if err == nil {
-					if !reqBuilder.HasHostId() {
-						reqBuilder.SetHostId(instanceId)
-						reqBuilder.AddLogEntry(item.ID, timestamp, item.Message)
-						continue
-					}
-					if !reqBuilder.MatchHostId(instanceId) {
-						output <- reqBuilder.GetLogs()
-						reqBuilder = NewOtlpRequestBuilder().
-							SetCloudAccount(account).
-							SetLogGroup(logGroup).
-							SetLogStream(logStream).
-							SetHostId(instanceId).
-							AddLogEntry(item.ID, timestamp, item.Message)
-						continue
-					}
+				if !reqBuilder.HasHostId() {
+					reqBuilder.SetHostId(instanceId)
+					reqBuilder.AddLogEntry(item.ID, timestamp, item.Message)
+					continue
+				}
+				if !reqBuilder.MatchHostId(instanceId) {
+					output <- reqBuilder.GetLogs()
+					reqBuilder = NewOtlpRequestBuilder().
+						SetCloudAccount(account).
+						SetLogGroup(logGroup).
+						SetLogStream(logStream).
+						SetHostId(instanceId).
+						AddLogEntry(item.ID, timestamp, item.Message)
+					continue
 				}
 			}
 		}
 
 		if reqBuilder.HasHostId() && !reqBuilder.MatchHostId(logStream) {
-			output <- reqBuilder.GetLogs()
-			reqBuilder = NewOtlpRequestBuilder().
-				SetCloudAccount(account).
-				SetLogGroup(logGroup).
-				SetLogStream(logStream).
-				AddLogEntry(item.ID, item.Timestamp * timestampMultiplier, item.Message)
-				continue
+		output <- reqBuilder.GetLogs()
+		reqBuilder = NewOtlpRequestBuilder().
+			SetCloudAccount(account).
+			SetLogGroup(logGroup).
+			SetLogStream(logStream).
+			AddLogEntry(item.ID, item.Timestamp * timestampMultiplier, item.Message)
+			continue
 
 		}
 
@@ -236,6 +257,81 @@ func transformLogEvents(account, logGroup, logStream string, input [] events.Clo
 	}
 }
 
+func parseMessage(message string) (ok bool, result iEc2Event) {
+	ok = false
+	result = nil
+	if strings.Contains(message, "ec2.amazonaws.com") && strings.Contains(message, "instancesSet") {
+		// parse message as json event object
+
+		ec2Event := ec2CloudTrailEvent {}
+		err := json.Unmarshal([]byte(message), &ec2Event)
+		if err == nil {
+			ok = true
+			result = &ec2Event
+			return
+		}
+	}
+	if strings.Contains(message, "ec2_instance_id") {
+		ciLog := cloudInsightsLog{}
+		err := json.Unmarshal([]byte(message), &ciLog)
+		if err == nil {
+			ok = true
+			result = &ciLog
+			return
+		}
+	}
+
+	if strings.Contains(message, "host") &&  strings.Contains(message, "namespace_name") {
+		ciAppLog := cloudInsightsAppLog{}
+		err := json.Unmarshal([]byte(message), &ciAppLog)
+		if err == nil {
+			ok = true
+			result = &ciAppLog
+			return
+		}
+	}
+
+	if strings.Contains(message, "InstanceId") &&  strings.Contains(message, "AutoScalingGroupName") {
+		ciPerfLog := cloudInsightsPerformance{}
+		err := json.Unmarshal([]byte(message), &ciPerfLog)
+		if err == nil {
+			ok = true
+			result = &ciPerfLog
+			return
+		}
+	}
+	return
+}
+
+func (evt *ec2CloudTrailEvent) getInstanceId() (result string, err error) {
+	result, err = extractEC2InstanceId(evt)
+	return
+}
+
+func (evt *cloudInsightsLog) getInstanceId() (result string, err error) {
+	result = evt.Ec2InstanceId
+	return
+}
+
+func (evt *cloudInsightsAppLog) getInstanceId() (result string, err error) {
+	
+	if strings.HasPrefix( evt.Kubernetes.Host, "i-") {
+		pos := strings.Index(evt.Kubernetes.Host, ".")
+		if pos < 0 {
+			pos = len(evt.Kubernetes.Host)
+		}
+		result = evt.Kubernetes.Host[0: pos]
+	} else {
+		err = errors.New(fmt.Sprint("Failed to parse EC2 instance ID from ", evt.Kubernetes.Host))
+	}
+	return
+}
+
+
+func (evt *cloudInsightsPerformance) getInstanceId() (result string, err error) {
+	result = evt.InstanceId
+	return
+}
 func main() {
 	lambda.Start(handleEvent)
 }

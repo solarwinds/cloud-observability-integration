@@ -60,8 +60,8 @@ func TestOltpRequestBuilder(t *testing.T) {
 		assert.Equal(t, expectedAttrs, attrs)
 	})
 
-	rb.SetHostId("")
 	t.Run("When log stream starts with 'i-' host id and platform is set", func(t *testing.T) {
+		rb.SetHostId("")
 		rb.SetLogStream("i-12345-test")
 		assert.True(t, rb.MatchHostId("i-12345-test"))
 		attrs := rb.GetLogs().ResourceLogs().At(0).Resource().Attributes().AsRaw()

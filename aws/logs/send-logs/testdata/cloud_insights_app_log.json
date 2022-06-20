@@ -1,0 +1,13 @@
+{
+    "log": "[2022/06/07 10:34:46] [ info] [output:cloudwatch_logs:cloudwatch_logs.0] Sent 57 events to CloudWatch\n",
+    "stream": "stderr",
+    "kubernetes": {
+        "pod_name": "test",
+        "namespace_name": "amazon-cloudwatch",
+        "pod_id": "test",
+        "host": "i-test.test.compute.internal",
+        "container_name": "test",
+        "docker_id": "test",
+        "container_image": "amazon/test:2.10.0"
+    }
+}

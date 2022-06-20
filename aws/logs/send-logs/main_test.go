@@ -74,6 +74,117 @@ func TestCloudTrailEventParsing(t *testing.T) {
 	t.Log("TestCloudTrailEventParsing")
 }
 
+func TestMessageKindDetection(t *testing.T) {
+	cloudTrailEc2Message, err := os.ReadFile("testdata/event1.json")
+	assert.Nil(t, err)
+	cloudInsightsLogMessage1, err := os.ReadFile("testdata/cloud_insights_log.json")
+	assert.Nil(t, err)
+	cloudInsightsLogMessage2, err := os.ReadFile("testdata/cloud_insights_app_log.json")
+	assert.Nil(t, err)
+	cloudInsightsLogMessage3, err := os.ReadFile("testdata/cloud_insights_perf.json")
+	assert.Nil(t, err)
+
+	testCases := [] struct {
+		name string
+		message string
+		ok bool
+		result iEc2Event
+		ec2InstanceId string
+	} {
+		{
+			name: "Plain text message detected as Default message kind",
+			message: "Hello, World!",
+			ok: false,
+			result: nil,
+		},
+		{
+			name: "CloudTrail EC2 event is detected and parsed",
+			message: string(cloudTrailEc2Message),
+			ok: true,
+			result: &ec2CloudTrailEvent{
+				cloudTrailEvent:   cloudTrailEvent{
+					EventSource: "ec2.amazonaws.com",
+					EventName:   "RunInstances",
+				},
+				RequestParameters: ec2InstancesSet{
+					InstancesSet: ec2InstancesSetItems{
+						Items: []ec2InstanceParameter {
+							{},
+						},
+					},
+				},
+				ResponseElements:  ec2InstancesSet{
+					InstancesSet: ec2InstancesSetItems{
+						Items: []ec2InstanceParameter {
+							{
+								InstanceId: "i-061bf37e959383a04",
+							},
+						},
+					},
+				},
+			},
+			ec2InstanceId: "i-061bf37e959383a04",
+		},
+		{
+			name: "Suspected CloudTrail EC2 event message having unrecognized structure detected as Default messsage kind",
+			message: "eventName ec2.amazonaws.com instancesSet",
+			ok: false,
+			result: nil,
+		},
+		{
+			name: "Cluster Insights log message is detected and parsed",
+			message: string(cloudInsightsLogMessage1),
+			ok: true,
+			result: &cloudInsightsLog{
+				Ec2InstanceId: "i-test",
+			},
+			ec2InstanceId: "i-test",
+		},
+		{
+			name: "Cluster Insights app log message is detected and parsed",
+			message: string(cloudInsightsLogMessage2),
+			ok: true,
+			result: &cloudInsightsAppLog{
+				Kubernetes:cloudInsightsAppLogKubernetes {
+					Host: "i-test.test.compute.internal",
+				},		
+			},
+			ec2InstanceId: "i-test",
+		},
+		{
+			name: "Cluster Insights performance metrics message is detected and parsed",
+			message: string(cloudInsightsLogMessage3),
+			ok: true,
+			result: &cloudInsightsPerformance{
+				InstanceId: "i-test",
+			},
+			ec2InstanceId: "i-test",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ok, result := parseMessage(tc.message)
+			assert.Equal(t, tc.ok, ok)
+			assert.Equal(t, tc.result, result)
+			if ok {
+				ec2InstanceId, _ := result.getInstanceId()
+				assert.Equal(t, tc.ec2InstanceId, ec2InstanceId)
+			}
+		})
+	}
+}
+
+func TestMessageParsing(t *testing.T) {
+	cloudTrailEc2Message, err := os.ReadFile("testdata/event1.json")
+	assert.Nil(t, err)
+	ok, ec2Event := parseMessage(string(cloudTrailEc2Message))
+
+	assert.True(t, ok)
+	id, err := ec2Event.getInstanceId()
+	assert.Equal(t, "i-061bf37e959383a04", id)
+}
+
 func TestLogEventsTransform(t *testing.T) {
 	logEvents := make([] events.CloudwatchLogsLogEvent, 0)
 
