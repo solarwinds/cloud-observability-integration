@@ -1,8 +1,8 @@
-# Logs forwarding
+# Activity logs forwarding example
 
 Guide how to forward logs from resource to event hub.
 
-- Open detail of resource from which logs should be forwarded
+- Open detail of a resource from which logs should be forwarded
 - Go to **Activity log** section
 - Click **Export Activity Logs**
 - Click **Add diagnostic setting**
