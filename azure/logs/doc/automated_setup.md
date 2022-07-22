@@ -14,4 +14,4 @@ Run the deployment script:
 ./deploy-swi-azure-logs-forwarder.ps1 -SwiApiKey <api_key>
 
 ## Logs forwarding
-Logs must be forwarded for each resource from which logs will be monitored. It can be done following [guide](logs_forwarding.md)
+Forward logs you want to see in website to created event hub. It can be done following [guide](logs_forwarding.md)
