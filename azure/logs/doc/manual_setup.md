@@ -48,4 +48,5 @@ Azure function apps have built-in triggers for Event Hub. When the triggers are 
 - Add SWI_OTEL_ENDPOINT environmental variable containing the URI of the telemetry endpoint: https://api.dc-01.cloud.solarwinds.com/v1/logs
 - Save the function.
 
-
+## Logs forwarding
+Forward logs you want to see in website to created event hub. It can be done following [guide](logs_forwarding.md)
