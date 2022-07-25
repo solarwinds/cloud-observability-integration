@@ -12,3 +12,6 @@ Obtain your API key from the SolarWinds Observability portal:
 
 Run the deployment script:
 ./deploy-swi-azure-logs-forwarder.ps1 -SwiApiKey <api_key>
+
+## Logs forwarding
+Forward logs you want to see in website to created event hub. It can be done following [guide](logs_forwarding.md)
