@@ -1,18 +1,20 @@
 package main
 
 import (
-	"strings"
-
+	"regexp"
 	"go.opentelemetry.io/collector/model/pdata"
 	semconv "go.opentelemetry.io/collector/model/semconv/v1.5.0"
 )
-
+var (
+	detectHostIdRegExp = regexp.MustCompile(`^(?P<HostId>(i-|ip-)[\w\-]+)`)
+	detectRegionRegExp = regexp.MustCompile(`(?P<Region>\w{2}-\w+-\d+)`)
+)
 type OtlpRequestBuilder interface {
 	SetHostId(hostId string) (OtlpRequestBuilder)
 	SetCloudAccount(account string) (OtlpRequestBuilder)
 	SetLogGroup(logGroup string) (OtlpRequestBuilder)
 	SetLogStream(logStream string) (OtlpRequestBuilder)
-	AddLogEntry(entryId string, timestamp int64, message string) (OtlpRequestBuilder)
+	AddLogEntry(entryId string, timestamp int64, message, region string) (OtlpRequestBuilder)
 	MatchHostId(hostId string) (bool)
 	HasHostId() (bool)
 	GetLogs() pdata.Logs
@@ -24,6 +26,8 @@ type otlpRequestBuilder struct {
 	instrLogsSlice pdata.InstrumentationLibraryLogsSlice
 	instrLogs pdata.InstrumentationLibraryLogs
 	hostId string
+	parsedRegion string
+	parsedHostId string
 }
 
 func NewOtlpRequestBuilder() (builder OtlpRequestBuilder){
@@ -67,7 +71,19 @@ func (rb * otlpRequestBuilder) SetLogGroup(logGroup string) (builder OtlpRequest
 func (rb * otlpRequestBuilder) SetLogStream(logStream string) (builder OtlpRequestBuilder) {
 	attrs := rb.resLogs.Resource().Attributes()
 	attrs.InsertString(semconv.AttributeAWSLogStreamNames, logStream)
-	if strings.HasPrefix( logStream, "i-") && !rb.HasHostId() {
+	matches := detectHostIdRegExp.FindStringSubmatch(logStream)
+	matchIndex := detectHostIdRegExp.SubexpIndex("HostId")
+	if matchIndex >= 0 && matchIndex < len(matches) {
+		rb.parsedHostId = matches[matchIndex]
+	}
+
+	matches = detectRegionRegExp.FindStringSubmatch(logStream)
+	matchIndex = detectRegionRegExp.SubexpIndex("Region")
+	if matchIndex >= 0 && matchIndex < len(matches) {
+		rb.parsedRegion = matches[matchIndex]
+	}
+
+	if rb.parsedHostId != "" && !rb.HasHostId() {
 		rb.SetHostId(logStream)
 	}
 	builder = rb
@@ -82,7 +98,7 @@ func (rb *otlpRequestBuilder) HasHostId() (bool) {
 	return rb.hostId != ""
 }
 
-func (rb *otlpRequestBuilder) AddLogEntry(itemId string, timestamp int64, message string) (builder OtlpRequestBuilder) {
+func (rb *otlpRequestBuilder) AddLogEntry(itemId string, timestamp int64, message, region string) (builder OtlpRequestBuilder) {
 	if rb.instrLogsSlice.Len()== 0 {
 		rb.instrLogs = rb.instrLogsSlice.AppendEmpty()
 	}
@@ -90,6 +106,11 @@ func (rb *otlpRequestBuilder) AddLogEntry(itemId string, timestamp int64, messag
 	logEntry.SetName(itemId)
 	logEntry.SetTimestamp(pdata.Timestamp(timestamp))
 	logEntry.Body().SetStringVal(message)
+	if region != "" {
+		logEntry.Attributes().UpsertString(semconv.AttributeCloudRegion, region)
+	} else if rb.parsedRegion != "" {
+		logEntry.Attributes().UpsertString(semconv.AttributeCloudRegion, rb.parsedRegion)
+	}
 	builder = rb
 	return
 }
