@@ -5,7 +5,7 @@
         "pod_name": "test",
         "namespace_name": "amazon-cloudwatch",
         "pod_id": "test",
-        "host": "i-test.test.compute.internal",
+        "host": "ip-127-0-0-1.us-east-2.compute.internal",
         "container_name": "test",
         "docker_id": "test",
         "container_image": "amazon/test:2.10.0"

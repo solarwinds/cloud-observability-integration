@@ -70,7 +70,59 @@ func TestOltpRequestBuilder(t *testing.T) {
 	})
 
 
-	rb.AddLogEntry("test entry id", time.Now().UnixMilli(), "test body")
+	rb.AddLogEntry("test entry id", time.Now().UnixMilli(), "test body", "")
 	logs := rb.GetLogs()
 	assert.Equal(t, 1, logs.ResourceLogs().At(0).InstrumentationLibraryLogs().Len())
+
+	t.Run(fmt.Sprintf("When region is empty '%s' is not set ", semconv.AttributeCloudRegion), func(t * testing.T) {
+		logEntry := logs.ResourceLogs().At(0).InstrumentationLibraryLogs().At(0).Logs().At(0)
+		_, ok := logEntry.Attributes().Get(semconv.AttributeCloudRegion)
+		assert.False(t, ok, fmt.Sprintf("Attribute '%s' should not be present.", semconv.AttributeCloudRegion))
+	})
+
+	region:= "us-east-1"
+	rb.AddLogEntry("test entry id", time.Now().UnixMilli(), "test body", region)
+	logs = rb.GetLogs()
+
+	t.Run(fmt.Sprintf("When region is provided '%s' is set to expected region ", semconv.AttributeCloudRegion), func(t * testing.T) {
+		logEntry := logs.ResourceLogs().At(0).InstrumentationLibraryLogs().At(0).Logs().At(1)
+		regionAttr, ok := logEntry.Attributes().Get(semconv.AttributeCloudRegion)
+		assert.True(t, ok, fmt.Sprintf("Attribute '%s' should be present.", semconv.AttributeCloudRegion))
+		if ok {
+			assert.Equal(t, region, regionAttr.AsString())
+		}
+	})
+
+	tcs := [] struct {
+		name string
+		region string
+	} {
+		{
+			name: "125229878893_CloudTrail_us-east-2",
+			region: "us-east-2",
+		},
+	}
+	rb = NewOtlpRequestBuilder()
+	for _, tc := range(tcs) {
+		t.Run(fmt.Sprintf("When log stream name is '%s' parsed region equals '%s'", tc.name, tc.region), func(t *testing.T) {
+			rb.SetLogStream(tc.name)
+			rb.AddLogEntry("test id", time.Now().UnixMilli(), "test body", "" )
+			logs = rb.GetLogs()
+			logIndex := logs.ResourceLogs().At(0).InstrumentationLibraryLogs().At(0).Logs().Len() - 1
+			logEntry := logs.ResourceLogs().At(0).InstrumentationLibraryLogs().At(0).Logs().At(logIndex)
+			regionAttr, ok := logEntry.Attributes().Get(semconv.AttributeCloudRegion)
+			assert.True(t, ok, fmt.Sprintf("Attribute '%s' should be present.", semconv.AttributeCloudRegion))
+			if ok {
+				assert.Equal(t, tc.region, regionAttr.AsString())
+			}
+		})
+	}
+
+	t.Run("Test regular expression", func(t *testing.T) {
+		matches := detectRegionRegExp.FindStringSubmatch("125229878893_CloudTrail_us-east-2")
+		assert.True(t, len(matches) > 0)
+		i := detectRegionRegExp.SubexpIndex("Region")
+		t.Logf(matches[i])
+		//t.Fail()
+	})
 }

@@ -13,7 +13,7 @@ import (
 )
 
 var _= (func() interface {} {
-	runningTests = true 
+	runningTests = true
 	return nil
 }())
 
@@ -24,36 +24,39 @@ func TestCloudTrailEventParsing(t *testing.T) {
 		eventSource string
 		instanceIdInRequest string
 		instanceIdInResponse string
+		region string
 		err error
 	} {
 		{
 			file: "testdata/event1.json",
 			eventSource: "ec2.amazonaws.com",
 			instanceIdInResponse: "i-061bf37e959383a04",
+			region: "us-east-1",
 		},
 		{
 			file: "testdata/event2.json",
 			eventSource: "ec2.amazonaws.com",
 			instanceIdInRequest: "i-061bf37e959383a04",
+			region: "us-east-1",
 		},
 	}
-	
+
 	for _, tc:= range testCases {
 		t.Run(tc.file, func (t * testing.T ) {
-			// parse basic cloud trail event 
+			// parse basic cloud trail event
 			data, err := os.ReadFile(tc.file)
 			if err!= nil {
-				t.Fatalf("While opening %q: %q", tc.file, err)			
+				t.Fatalf("While opening %q: %q", tc.file, err)
 			}
 			basicEvent := cloudTrailEvent {}
 			err = json.Unmarshal(data, &basicEvent)
 			assert.NoError(t, err)
 			assert.Equal(t, tc.eventSource, basicEvent.EventSource)
-			
+
 			// parse detailed cloudtrail event
 
 			detailedEvent := ec2CloudTrailEvent {}
-			
+
 			err = json.Unmarshal(data, &detailedEvent)
 			assert.NoError(t, err)
 			if tc.instanceIdInRequest != "" {
@@ -68,6 +71,8 @@ func TestCloudTrailEventParsing(t *testing.T) {
 				assert.NoError(t, err)
 				assert.Equal(t, tc.instanceIdInResponse, instanceId)
 			}
+
+			assert.Equal(t, tc.region, detailedEvent.getRegion())
 		})
 	}
 
@@ -83,6 +88,8 @@ func TestMessageKindDetection(t *testing.T) {
 	assert.Nil(t, err)
 	cloudInsightsLogMessage3, err := os.ReadFile("testdata/cloud_insights_perf.json")
 	assert.Nil(t, err)
+	cloudTrailGenericMessage, err := os.ReadFile("testdata/event3.json")
+
 
 	testCases := [] struct {
 		name string
@@ -90,6 +97,7 @@ func TestMessageKindDetection(t *testing.T) {
 		ok bool
 		result iEc2Event
 		ec2InstanceId string
+		region string
 	} {
 		{
 			name: "Plain text message detected as Default message kind",
@@ -105,6 +113,7 @@ func TestMessageKindDetection(t *testing.T) {
 				cloudTrailEvent:   cloudTrailEvent{
 					EventSource: "ec2.amazonaws.com",
 					EventName:   "RunInstances",
+					Region: "us-east-1",
 				},
 				RequestParameters: ec2InstancesSet{
 					InstancesSet: ec2InstancesSetItems{
@@ -124,6 +133,7 @@ func TestMessageKindDetection(t *testing.T) {
 				},
 			},
 			ec2InstanceId: "i-061bf37e959383a04",
+			region: "us-east-1",
 		},
 		{
 			name: "Suspected CloudTrail EC2 event message having unrecognized structure detected as Default messsage kind",
@@ -137,8 +147,10 @@ func TestMessageKindDetection(t *testing.T) {
 			ok: true,
 			result: &cloudInsightsLog{
 				Ec2InstanceId: "i-test",
+				Region: "us-east-1",
 			},
 			ec2InstanceId: "i-test",
+			region: "us-east-1",
 		},
 		{
 			name: "Cluster Insights app log message is detected and parsed",
@@ -146,10 +158,13 @@ func TestMessageKindDetection(t *testing.T) {
 			ok: true,
 			result: &cloudInsightsAppLog{
 				Kubernetes:cloudInsightsAppLogKubernetes {
-					Host: "i-test.test.compute.internal",
-				},		
+					Host: "ip-127-0-0-1.us-east-2.compute.internal",
+				},
+				parsedInstanceId: "ip-127-0-0-1",
+				parsedRegion: "us-east-2",
 			},
-			ec2InstanceId: "i-test",
+			ec2InstanceId: "ip-127-0-0-1",
+			region: "us-east-2",
 		},
 		{
 			name: "Cluster Insights performance metrics message is detected and parsed",
@@ -157,8 +172,24 @@ func TestMessageKindDetection(t *testing.T) {
 			ok: true,
 			result: &cloudInsightsPerformance{
 				InstanceId: "i-test",
+				NodeName: "ip-192-0-2-0.us-west-2.compute.internal",
+				parsedRegion: "us-west-2",
 			},
 			ec2InstanceId: "i-test",
+			region: "us-west-2",
+
+		},
+		{
+			name: "CloudTrail generic message detected and parsed for region",
+			message: string(cloudTrailGenericMessage),
+			ok: true,
+			result: &cloudTrailEvent {
+					EventSource: "rds.amazonaws.com",
+					EventName:   "DescribeDBInstances",
+					Region: "eu-west-3",
+			},
+			ec2InstanceId: "",
+			region: "eu-west-3",
 		},
 	}
 
@@ -170,6 +201,8 @@ func TestMessageKindDetection(t *testing.T) {
 			if ok {
 				ec2InstanceId, _ := result.getInstanceId()
 				assert.Equal(t, tc.ec2InstanceId, ec2InstanceId)
+				region := result.getRegion()
+				assert.Equal(t, tc.region, region)
 			}
 		})
 	}
@@ -205,7 +238,7 @@ func TestLogEventsTransform(t *testing.T) {
 	output := make(chan pdata.Logs)
 
 	go transformLogEvents("test account", "test log group", "i-12345678", logEvents, output)
-	
+
 	testCases := [] struct {
 		name string
 		action func(t *testing.T, logs pdata.Logs)
@@ -218,7 +251,7 @@ func TestLogEventsTransform(t *testing.T) {
 					log := resLogs.At(0)
 					assert.Equal(t, 1, log.InstrumentationLibraryLogs().Len())
 					instrLog := log.InstrumentationLibraryLogs().At(0)
-					assert.Equal(t, 2, instrLog.Logs().Len()) 
+					assert.Equal(t, 2, instrLog.Logs().Len())
 				},
 			},
 			{
@@ -229,19 +262,19 @@ func TestLogEventsTransform(t *testing.T) {
 					log := resLogs.At(0)
 					assert.Equal(t, 1, log.InstrumentationLibraryLogs().Len())
 					instrLog := log.InstrumentationLibraryLogs().At(0)
-					assert.Equal(t, 1, instrLog.Logs().Len()) 
+					assert.Equal(t, 1, instrLog.Logs().Len())
 				},
 			},
 			{
 				name : "Log event without host id produces new logs",
 				action : func(t *testing.T, logs pdata.Logs) {
 					resLogs := logs.ResourceLogs()
-				
+
 					assert.Equal(t, 1, resLogs.Len())
 					log := resLogs.At(0)
 					assert.Equal(t, 1, log.InstrumentationLibraryLogs().Len())
 					instrLog := log.InstrumentationLibraryLogs().At(0)
-					assert.Equal(t, 1, instrLog.Logs().Len()) 
+					assert.Equal(t, 1, instrLog.Logs().Len())
 					attrs := log.Resource().Attributes().AsRaw()
 					hostId, _ := attrs[semconv.AttributeHostID]
 					assert.Equal(t, "i-12345678", hostId)
@@ -284,5 +317,5 @@ func createCloudTrailCloudWatchEvent(logItemId, eventName, instanceId string) (e
 		Timestamp: time.Now().Unix(),
 		Message:   string(msg),
 	}
-	return 
+	return
 }
