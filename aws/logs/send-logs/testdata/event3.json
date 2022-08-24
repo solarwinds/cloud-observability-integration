@@ -1,0 +1,46 @@
+{
+    "eventVersion": "1.08",
+    "userIdentity": {
+        "type": "AssumedRole",
+        "principalId": "test",
+        "arn": "test",
+        "accountId": "test",
+        "accessKeyId": "test",
+        "sessionContext": {
+            "sessionIssuer": {
+                "type": "Role",
+                "principalId": "test",
+                "arn": "test",
+                "accountId": "test",
+                "userName": "test"
+            },
+            "webIdFederationData": {},
+            "attributes": {
+                "creationDate": "1970-01-00T00:00:00Z",
+                "mfaAuthenticated": "false"
+            }
+        }
+    },
+    "eventTime": "1970-01-00T00:00:00Z",
+    "eventSource": "rds.amazonaws.com",
+    "eventName": "DescribeDBInstances",
+    "awsRegion": "eu-west-3",
+    "sourceIPAddress": "127.0.0.1",
+    "userAgent": "user-agent",
+    "requestParameters": {
+        "maxRecords": 100
+    },
+    "responseElements": null,
+    "requestID": "test",
+    "eventID": "test",
+    "readOnly": true,
+    "eventType": "AwsApiCall",
+    "managementEvent": true,
+    "recipientAccountId": "test",
+    "eventCategory": "Management",
+    "tlsDetails": {
+        "tlsVersion": "TLSv1.2",
+        "cipherSuite": "ECDHE-RSA-AES128-GCM-SHA256",
+        "clientProvidedHostHeader": "rds.eu-west-3.amazonaws.com"
+    }
+}
