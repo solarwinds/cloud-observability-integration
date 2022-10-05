@@ -34,8 +34,9 @@ Azure function apps have built-in triggers for Event Hub. When the triggers are 
 - In the New page, select Compute > Function App.
 - On the Basics page, use the function app settings: Subscription, Resource Group, Region, and Function App name.
 - Select **Publish to Code, .NET as Runtime stack and Version 6**.
+- Select **operating system Windows**, and serverless plan type.
 - Select Next:Hosting.
-- Select a storage account, **operating system Windows**, and serverless plan type.
+- Select a storage account.
 - Select Review + create to review the app configuration selections.
 - On the Review + create page, review your settings, and then select Create to provision and deploy the function app.
 
@@ -44,6 +45,8 @@ Azure function apps have built-in triggers for Event Hub. When the triggers are 
 - In the Create Function window, ensure the Development environment property has **Develop in portal** and select the **EventHub trigger template**.
 - Select Code + Test.
 - Copy and Paste [function code](template/run.csx) to run.csx file.
+- Go back to function app detail.
+- Select Configuration.
 - Add SWI_API_KEY environmental variable containing your API key obtained from SolarWinds portal.
 - Add SWI_OTEL_ENDPOINT environmental variable containing the URI of the telemetry endpoint: https://api.dc-01.cloud.solarwinds.com/v1/logs
 - Save the function.
