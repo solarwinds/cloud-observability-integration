@@ -13,7 +13,7 @@ Obtain and copy your API key from the SolarWinds Observability portal - see [API
 
 Run the deployment script in powershell console:
 
-`./deploy-swi-azure-logs-forwarder.ps1 -SwiApiKey YourSolarWindsApiToken -swiOtelEndpoint YourOtelEndpoint -ResourceGroupName YourResourceGroupName -ProjectName YourProjectName -FunctionName YourFunctionName` -ResourceGroupLocation YourResourceGroupLocation
+`./deploy-swi-azure-logs-forwarder.ps1 -SwiApiKey YourSolarWindsApiToken -swiOtelEndpoint YourOtelEndpoint -ResourceGroupName YourResourceGroupName -ProjectName YourProjectName -FunctionName YourFunctionName -ResourceGroupLocation YourResourceGroupLocation`
 
 Replace:
 1. YourSolarWindsApiToken with the text copied previously.
