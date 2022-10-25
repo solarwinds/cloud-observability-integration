@@ -39,14 +39,14 @@
     },
     "functions": [],
     "variables": {
-        "eventHubNamespaceName": "[concat(parameters('projectName'), 'ns')]",
+        "eventHubNamespaceName": "[concat(parameters('projectName'), 'ns-', uniquestring(resourceGroup().id))]",
         "eventHubName": "[parameters('projectName')]",
 
         "connectionStringKey": "[concat('swi-',variables('eventHubNamespaceName'),'-AccessKey')]",
         "authRule": "[resourceId('Microsoft.EventHub/namespaces/authorizationRules', variables('eventHubNamespaceName'),'RootManageSharedAccessKey')]",
 
-        "storageAccountName": "[format('fnstor{0}', replace(parameters('projectName'), '-', ''))]",
-        "functionAppName": "[format('{0}-app', parameters('projectName'))]",
+        "storageAccountName": "[concat(uniquestring(resourceGroup().id), 'swistoracc')]",
+        "functionAppName": "[concat(parameters('projectName'), '-app-', uniquestring(resourceGroup().id))]",
 
         "functionName": "[parameters('functionName')]"
     },

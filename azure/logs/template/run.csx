@@ -13,13 +13,14 @@
 * under the License.
 */
 
-#r "Microsoft.Azure.EventHubs"
+#r "Azure.Messaging.EventHubs"
 #r "System.Text.Json"
+#r "System.Memory.Data"
 
 
 using System;
 using System.Text;
-using Microsoft.Azure.EventHubs;
+using Azure.Messaging.EventHubs;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -94,7 +95,7 @@ public static async Task Run(EventData[] events, ILogger logger)
     {
         try
         {
-            string messageBody = Encoding.UTF8.GetString(eventData.Body.Array, eventData.Body.Offset, eventData.Body.Count);
+            string messageBody = Encoding.UTF8.GetString(eventData.EventBody);
             logger.LogDebug($"C# Event Hub trigger function processed a message: {messageBody}");
 
             var log = JsonSerializer.Deserialize<dynamic>(messageBody);
