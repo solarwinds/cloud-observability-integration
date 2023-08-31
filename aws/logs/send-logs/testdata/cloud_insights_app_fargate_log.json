@@ -1,0 +1,25 @@
+{
+    "stream": "stderr",
+    "logtag": "F",
+    "log": "AH00558: apache2: Could not reliably determine the server's fully qualified domain name, using 192.168.149.22. Set the 'ServerName' directive globally to suppress this message",
+    "kubernetes": {
+        "pod_name": "php-app-7657497f69-vfvtf",
+        "namespace_name": "faragate-namespace",
+        "pod_id": "d9ecc709-b396-4e8a-a041-ebb49d98a5c6",
+        "labels": {
+            "app": "php-app",
+            "eks.amazonaws.com/fargate-profile": "fargate-test-cluster-profile",
+            "pod-template-hash": "7657497f69"
+        },
+        "annotations": {
+            "CapacityProvisioned": "0.25vCPU 0.5GB",
+            "Logging": "LoggingEnabled"
+        },
+        "host": "fargate-ip-192-168-149-22.us-east-2.compute.internal",
+        "container_name": "php-app",
+        "docker_id": "5f08ea472f14acc17caf0e32ab56030fbb950f6960c41ae1d40f63c34c842a7a",
+        "container_image": "php:8.0-apache-bullseye"
+    },
+    "sw.k8s.cluster.uid": "someClusterUid",
+    "sw.k8s.log.type": "container"
+}

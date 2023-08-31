@@ -11,7 +11,7 @@
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 * See the License for the specific language governing permissions and limitations
 * under the License.
-*/
+ */
 
 package main
 
@@ -40,40 +40,51 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
+// enum for supported event types
+const (
+	fargateEvent = "fargate"
+	ec2Event     = "ec2"
+)
+
 const (
 	awsLambdaFunctionNameVar = "AWS_LAMBDA_FUNCTION_NAME"
-	awsExecutionEnvVar = "AWS_EXECUTION_ENV"
-	awsRegionVar = "AWS_REGION"
-	otlpEndpointVar = "OTLP_ENDPOINT"
-	apiTokenVar = "API_TOKEN"
-	useEncryptionVar = "USE_ENCRYPTION"
-	timestampMultiplier = 1000000 // AWS Logs timestamp is in millisends since Jan 1 , 1970, OTEL Collector timestamp is in nanoseconds
+	awsExecutionEnvVar       = "AWS_EXECUTION_ENV"
+	awsRegionVar             = "AWS_REGION"
+	awsFunctionVersion       = "AWS_LAMBDA_FUNCTION_VERSION"
+	otlpEndpointVar          = "OTLP_ENDPOINT"
+	apiTokenVar              = "API_TOKEN"
+	useEncryptionVar         = "USE_ENCRYPTION"
+	timestampMultiplier      = 1000000 // AWS Logs timestamp is in millisends since Jan 1 , 1970, OTEL Collector timestamp is in nanoseconds
 )
 
 var (
-	runningTests = false
-	functionName string = os.Getenv(awsLambdaFunctionNameVar)
-	executingInAWS bool = strings.Contains(os.Getenv(awsExecutionEnvVar), "AWS_Lambda_")
-	lambdaRegion string = os.Getenv(awsRegionVar)
-	useEncryption = executingInAWS && strings.EqualFold(os.Getenv(useEncryptionVar), "yes")
-	endpoint string = os.Getenv(otlpEndpointVar) // encrypted when AWS_EXECUTION_ENV contains 'AWS_Lambda_'
-	apiToken string = os.Getenv(apiTokenVar) // encrypted when AWS_EXECUTION_ENV contains 'AWS_Lambda_'
-	appLogger = logger.NewLogger("send-logs")
-	kmsClient *kms.KMS
-	detectInstanceNameAndRegion = regexp.MustCompile(`(?P<Instance>(i-|ip-)[\w\-]+)\.(?P<Region>[\w\-]+)\.`)
+	runningTests                       = false
+	functionName                string = os.Getenv(awsLambdaFunctionNameVar)
+	executingInAWS              bool   = strings.Contains(os.Getenv(awsExecutionEnvVar), "AWS_Lambda_")
+	lambdaRegion                string = os.Getenv(awsRegionVar)
+	lambdaVersion               string = os.Getenv(awsFunctionVersion)
+	useEncryption                      = executingInAWS && strings.EqualFold(os.Getenv(useEncryptionVar), "yes")
+	endpoint                    string = os.Getenv(otlpEndpointVar) // encrypted when AWS_EXECUTION_ENV contains 'AWS_Lambda_'
+	apiToken                    string = os.Getenv(apiTokenVar)     // encrypted when AWS_EXECUTION_ENV contains 'AWS_Lambda_'
+	appLogger                          = logger.NewLogger("send-logs")
+	kmsClient                   *kms.KMS
+	detectInstanceNameAndRegion = regexp.MustCompile(`(?P<Fargate>(fargate-))?(?P<Instance>(i-|ip-)[\w\-]+)\.(?P<Region>[\w\-]+)\.`)
+	instanceParamIndex          = detectInstanceNameAndRegion.SubexpIndex("Instance")
+	regionParamIndex            = detectInstanceNameAndRegion.SubexpIndex("Region")
+	fargateParamIndex           = detectInstanceNameAndRegion.SubexpIndex("Fargate")
 )
 
 type cloudTrailEvent struct {
 	EventSource string `json:"eventSource"`
-	EventName string `json:"eventName"`
-	Region string `json:"awsRegion"`
+	EventName   string `json:"eventName"`
+	Region      string `json:"awsRegion"`
 }
 
 type ec2InstanceParameter struct {
 	InstanceId string `json:"instanceId"`
 }
 type ec2InstancesSetItems struct {
-	Items [] ec2InstanceParameter `json:"items"`
+	Items []ec2InstanceParameter `json:"items"`
 }
 
 type ec2InstancesSet struct {
@@ -82,34 +93,48 @@ type ec2InstancesSet struct {
 type ec2CloudTrailEvent struct {
 	cloudTrailEvent
 	RequestParameters ec2InstancesSet `json:"requestParameters"`
-	ResponseElements ec2InstancesSet `json:"responseElements"`
+	ResponseElements  ec2InstancesSet `json:"responseElements"`
 }
 
 type cloudInsightsLog struct {
 	Ec2InstanceId string `json:"ec2_instance_id"`
-	Region string `json:"az"`
+	Region        string `json:"az"`
 }
 
 type cloudInsightsAppLogKubernetes struct {
-	Host string `json:"host"`
+	PodName        string            `json:"pod_name"`
+	NamespaceName  string            `json:"namespace_name"`
+	PodID          string            `json:"pod_id"`
+	Labels         map[string]string `json:"labels"`
+	Annotations    map[string]string `json:"annotations"`
+	ContainerName  string            `json:"container_name"`
+	DockerID       string            `json:"docker_id"`
+	ContainerImage string            `json:"container_image"`
+	Host           string            `json:"host"`
 }
 
 type cloudInsightsAppLog struct {
-	Kubernetes cloudInsightsAppLogKubernetes `json:"kubernetes"`
+	Kubernetes       cloudInsightsAppLogKubernetes `json:"kubernetes"`
+	ClusterUID       string                        `json:"sw.k8s.cluster.uid"`
+	LogType          string                        `json:"sw.k8s.log.type"`
+	ManifestVersion  string                        `json:"sw.k8s.agent.manifest.version"`
+	Stream           string                        `json:"stream"`
+	Logtag           string                        `json:"logtag"`
+	Log              string                        `json:"log"`
 	parsedInstanceId string
-	parsedRegion string
+	parsedRegion     string
 }
 
 type cloudInsightsPerformance struct {
-	InstanceId string `json:"InstanceId"`
-	NodeName string `json:"NodeName"`
+	InstanceId   string `json:"InstanceId"`
+	NodeName     string `json:"NodeName"`
 	parsedRegion string
 }
 
-
 type iEc2Event interface {
 	getInstanceId() (string, error)
-	getRegion() (string)
+	getRegion() string
+	getEventType() string
 }
 
 func init() {
@@ -127,7 +152,6 @@ func init() {
 		appLogger.Info("Skipping parameter decryption.")
 		return
 	}
-
 
 	kmsClient = kms.New(session.New())
 	endpoint = decodeString(endpoint)
@@ -153,7 +177,7 @@ func decodeString(encrypted string) string {
 	return string(response.Plaintext[:])
 }
 
-func extractEC2InstanceId(ec2Event * ec2CloudTrailEvent) (instanceId string, err error) {
+func extractEC2InstanceId(ec2Event *ec2CloudTrailEvent) (instanceId string, err error) {
 	if len(ec2Event.RequestParameters.InstancesSet.Items) > 0 {
 		instanceId = ec2Event.RequestParameters.InstancesSet.Items[0].InstanceId
 		if instanceId != "" {
@@ -182,7 +206,7 @@ func handleEvent(ctx context.Context, event events.CloudwatchLogsEvent) (r strin
 	dialOption := grpc.WithInsecure()
 
 	if executingInAWS {
-		config := &tls.Config {}
+		config := &tls.Config{}
 		dialOption = grpc.WithTransportCredentials(credentials.NewTLS(config))
 	}
 
@@ -199,10 +223,10 @@ func handleEvent(ctx context.Context, event events.CloudwatchLogsEvent) (r strin
 	logsChan := make(chan pdata.Logs)
 	go transformLogEvents(datareq.Owner, datareq.LogGroup, datareq.LogStream, datareq.LogEvents, logsChan)
 
-	errs := make([] error, 0)
-	ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer " + apiToken)
+	errs := make([]error, 0)
+	ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+apiToken)
 
-	for logsData := range logsChan  {
+	for logsData := range logsChan {
 		logRequest := otlpgrpc.NewLogsRequest()
 		logRequest.SetLogs(logsData)
 		_, err = logsClient.Export(ctx, logRequest)
@@ -221,7 +245,7 @@ func handleEvent(ctx context.Context, event events.CloudwatchLogsEvent) (r strin
 	return r, err
 }
 
-func transformLogEvents(account, logGroup, logStream string, input [] events.CloudwatchLogsLogEvent, output chan pdata.Logs) {
+func transformLogEvents(account, logGroup, logStream string, input []events.CloudwatchLogsLogEvent, output chan pdata.Logs) {
 	defer close(output)
 	reqBuilder := NewOtlpRequestBuilder().
 		SetCloudAccount(account).
@@ -249,17 +273,43 @@ func transformLogEvents(account, logGroup, logStream string, input [] events.Clo
 						SetHostId(instanceId)
 				}
 			}
-			reqBuilder.AddLogEntry(item.ID, timestamp, item.Message, ec2Event.getRegion())
+
+			if ec2Event.getEventType() == fargateEvent {
+				k8sFargateLog := ec2Event.(*cloudInsightsAppLog)
+
+				if !reqBuilder.HasContainerName() {
+					setKubernetesInfo(reqBuilder, k8sFargateLog)
+				} else if !reqBuilder.MatchContainerName(k8sFargateLog.ClusterUID, k8sFargateLog.Kubernetes.NamespaceName, k8sFargateLog.Kubernetes.PodName, k8sFargateLog.Kubernetes.ContainerName) {
+					// new container, send logs for previous container
+					output <- reqBuilder.GetLogs()
+					reqBuilder = setKubernetesInfo(
+						NewOtlpRequestBuilder().
+							SetCloudAccount(account).
+							SetLogGroup(logGroup).
+							SetLogStream(logStream),
+						k8sFargateLog)
+				}
+
+				reqBuilder.AddLogEntry(item.ID, timestamp, k8sFargateLog.Log, ec2Event.getRegion(), map[string]interface{}{
+					"sw.k8s.log.type": k8sFargateLog.LogType,
+					"syslog.facility": 1, // user-level messages
+					"syslog.version": 1,
+					"syslog.procid": "1",
+					"syslog.msgid": logStream,
+				})
+			} else {
+				reqBuilder.AddLogEntry(item.ID, timestamp, item.Message, ec2Event.getRegion())
+			}
 			continue
 		}
 
 		if reqBuilder.HasHostId() && !reqBuilder.MatchHostId(logStream) {
-		output <- reqBuilder.GetLogs()
-		reqBuilder = NewOtlpRequestBuilder().
-			SetCloudAccount(account).
-			SetLogGroup(logGroup).
-			SetLogStream(logStream).
-			AddLogEntry(item.ID, item.Timestamp * timestampMultiplier, item.Message, lambdaRegion)
+			output <- reqBuilder.GetLogs()
+			reqBuilder = NewOtlpRequestBuilder().
+				SetCloudAccount(account).
+				SetLogGroup(logGroup).
+				SetLogStream(logStream).
+				AddLogEntry(item.ID, item.Timestamp*timestampMultiplier, item.Message, lambdaRegion)
 			continue
 
 		}
@@ -273,24 +323,88 @@ func transformLogEvents(account, logGroup, logStream string, input [] events.Clo
 	}
 }
 
+func setKubernetesInfo(reqBuilder OtlpRequestBuilder, k8sFargateLog *cloudInsightsAppLog) OtlpRequestBuilder {
+	return reqBuilder.
+		SetKubernetesPodName(k8sFargateLog.Kubernetes.PodName).
+		SetKubernetesNamespaceName(k8sFargateLog.Kubernetes.NamespaceName).
+		SetKubernetesPodUID(k8sFargateLog.Kubernetes.PodID).
+		SetKubernetesContainerName(k8sFargateLog.Kubernetes.ContainerName).
+		SetKubernetesContainerId(k8sFargateLog.Kubernetes.DockerID).
+		SetKubernetesContainerImage(k8sFargateLog.Kubernetes.ContainerImage).
+		SetKubernetesClusterUid(k8sFargateLog.ClusterUID).
+		SetKubernetesNodeName(k8sFargateLog.Kubernetes.Host).
+		SetKubernetesPodLabels(k8sFargateLog.Kubernetes.Labels).
+		SetKubernetesPodAnnotations(k8sFargateLog.Kubernetes.Annotations).
+		SetKubernetesManifestVersion(k8sFargateLog.ManifestVersion, lambdaVersion).
+		SetSyslogAttributes(k8sFargateLog.Kubernetes.PodName, k8sFargateLog.Kubernetes.ContainerName)
+}
+
+// test path in json object for existence of property. If `value` is provided it test also for the value to equal. Examples:
+// 1. "eventSource" property
+// 2. "requestParameters.instancesSet"
+// 3. "requestParameters.instancesSet.items"
+func testJsonPath(jsonEvent map[string]interface{}, path string, values ...string) bool {
+	var value string
+	if len(values) > 0 {
+		value = values[0]
+	}
+
+	keys := strings.Split(path, ".")
+
+	var exists bool
+	var nextMap map[string]interface{}
+
+	nextMap = jsonEvent
+
+	for i, key := range keys {
+		val, exists := nextMap[key]
+		if !exists {
+			return false
+		}
+
+		if i == len(keys)-1 {
+			if value != "" {
+				strVal, ok := val.(string)
+				if !ok || strVal != value {
+					return false
+				}
+			}
+			return true
+		}
+
+		if nextValue, ok := val.(map[string]interface{}); ok {
+			nextMap = nextValue
+		} else {
+			return false
+		}
+	}
+
+	return exists
+}
+
 func parseMessage(message string) (ok bool, result iEc2Event) {
 	ok = false
 	result = nil
-	if strings.Contains(message, "ec2.amazonaws.com") && strings.Contains(message, "instancesSet") {
-		// parse message as json event object
 
-		ec2Event := ec2CloudTrailEvent {}
+	var jsonEvent map[string]interface{}
+	err := json.Unmarshal([]byte(message), &jsonEvent)
+	if err != nil {
+		ok = false
+		return
+	}
+
+	if testJsonPath(jsonEvent, "eventSource", "ec2.amazonaws.com") && (testJsonPath(jsonEvent, "requestParameters.instancesSet") || testJsonPath(jsonEvent, "responseElements.instancesSet")) {
+		ec2Event := ec2CloudTrailEvent{}
 		err := json.Unmarshal([]byte(message), &ec2Event)
 		if err == nil {
 			ok = true
 			result = &ec2Event
 			return
 		}
-
 	}
 
-	if strings.Contains(message, "eventVersion") {
-		genericCloudTrailEvent := cloudTrailEvent {}
+	if testJsonPath(jsonEvent, "eventVersion") {
+		genericCloudTrailEvent := cloudTrailEvent{}
 		err := json.Unmarshal([]byte(message), &genericCloudTrailEvent)
 		if err == nil {
 			ok = true
@@ -299,7 +413,7 @@ func parseMessage(message string) (ok bool, result iEc2Event) {
 		}
 	}
 
-	if strings.Contains(message, "ec2_instance_id") {
+	if testJsonPath(jsonEvent, "ec2_instance_id") {
 		ciLog := cloudInsightsLog{}
 		err := json.Unmarshal([]byte(message), &ciLog)
 		if err == nil {
@@ -309,7 +423,7 @@ func parseMessage(message string) (ok bool, result iEc2Event) {
 		}
 	}
 
-	if strings.Contains(message, "host") &&  strings.Contains(message, "namespace_name") {
+	if testJsonPath(jsonEvent, "kubernetes.host") && testJsonPath(jsonEvent, "kubernetes.namespace_name") {
 		ciAppLog := cloudInsightsAppLog{}
 		err := json.Unmarshal([]byte(message), &ciAppLog)
 		if err == nil {
@@ -320,7 +434,7 @@ func parseMessage(message string) (ok bool, result iEc2Event) {
 		}
 	}
 
-	if strings.Contains(message, "InstanceId") &&  strings.Contains(message, "AutoScalingGroupName") {
+	if testJsonPath(jsonEvent, "InstanceId") && testJsonPath(jsonEvent, "AutoScalingGroupName") {
 		ciPerfLog := cloudInsightsPerformance{}
 		err := json.Unmarshal([]byte(message), &ciPerfLog)
 		if err == nil {
@@ -343,6 +457,11 @@ func (evt *ec2CloudTrailEvent) getRegion() (result string) {
 	return
 }
 
+func (evt *ec2CloudTrailEvent) getEventType() (result string) {
+	result = ec2Event
+	return
+}
+
 func (evt *cloudInsightsLog) getInstanceId() (result string, err error) {
 	result = evt.Ec2InstanceId
 	return
@@ -353,19 +472,43 @@ func (evt *cloudInsightsLog) getRegion() (result string) {
 	return
 }
 
+func (evt *cloudInsightsLog) getEventType() (result string) {
+	result = ec2Event
+	return
+}
+
 func (evt *cloudInsightsAppLog) parse() {
 	matches := detectInstanceNameAndRegion.FindStringSubmatch(evt.Kubernetes.Host)
-	instanceParamIndex := detectInstanceNameAndRegion.SubexpIndex("Instance")
-	if instanceParamIndex >= 0 && instanceParamIndex < len(matches) {
-		evt.parsedInstanceId = matches[instanceParamIndex]
-	}
-	regionParamIndex :=detectInstanceNameAndRegion.SubexpIndex("Region")
-	if regionParamIndex >= 0 && regionParamIndex < len(matches) {
-		evt.parsedRegion = matches[regionParamIndex]
+	if matches != nil {
+		if fargateParamIndex < len(matches) && matches[fargateParamIndex] != "" {
+			evt.parsedInstanceId = ""
+		} else if instanceParamIndex < len(matches) && matches[instanceParamIndex] != "" {
+			evt.parsedInstanceId = matches[instanceParamIndex]
+		}
+
+		if regionParamIndex < len(matches) && matches[regionParamIndex] != "" {
+			evt.parsedRegion = matches[regionParamIndex]
+		}
 	}
 }
+
 func (evt *cloudInsightsAppLog) getInstanceId() (result string, err error) {
 	result = evt.parsedInstanceId
+	if result == "" {
+		// most likely Fargate instance
+		err = errors.New("Instance Id is not present")
+	}
+	return
+}
+
+func (evt *cloudInsightsAppLog) getEventType() (result string) {
+	matches := detectInstanceNameAndRegion.FindStringSubmatch(evt.Kubernetes.Host)
+	if matches != nil && fargateParamIndex < len(matches) && matches[fargateParamIndex] != "" {
+		result = fargateEvent
+		return
+	}
+
+	result = ec2Event
 	return
 }
 
@@ -376,9 +519,7 @@ func (evt *cloudInsightsAppLog) getRegion() (result string) {
 
 func (evt *cloudInsightsPerformance) parse() {
 	matches := detectInstanceNameAndRegion.FindStringSubmatch(evt.NodeName)
-
-	regionParamIndex :=detectInstanceNameAndRegion.SubexpIndex("Region")
-	if regionParamIndex >= 0 && regionParamIndex < len(matches) {
+	if regionParamIndex < len(matches) {
 		evt.parsedRegion = matches[regionParamIndex]
 	}
 }
@@ -393,6 +534,11 @@ func (evt *cloudInsightsPerformance) getRegion() (result string) {
 	return
 }
 
+func (evt *cloudInsightsPerformance) getEventType() (result string) {
+	result = ec2Event
+	return
+}
+
 func (evt *cloudTrailEvent) getInstanceId() (result string, err error) {
 	result = ""
 	err = errors.New("Event doesn't contain EC2 Instance ID")
@@ -401,6 +547,11 @@ func (evt *cloudTrailEvent) getInstanceId() (result string, err error) {
 
 func (evt *cloudTrailEvent) getRegion() (result string) {
 	result = evt.Region
+	return
+}
+
+func (evt *cloudTrailEvent) getEventType() (result string) {
+	result = ec2Event
 	return
 }
 
