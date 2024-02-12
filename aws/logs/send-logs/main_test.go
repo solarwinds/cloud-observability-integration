@@ -450,7 +450,13 @@ func TestLogEventsTransformForFargateTwoDifferentContainers(t *testing.T) {
     assertLogRecordHasAttribute(t, resourceAttributes, "k8s.pod.labels.pod-template-hash", "7657497f69")
     assertLogRecordHasAttribute(t, resourceAttributes, "k8s.pod.annotations.CapacityProvisioned", "0.25vCPU 0.5GB")
     assertLogRecordHasAttribute(t, resourceAttributes, "k8s.pod.annotations.Logging", "LoggingEnabled")
+    assertLogRecordHasAttribute(t, resourceAttributes, "host.name", "php-app-7657497f69-vfvtf")
+    assertLogRecordHasAttribute(t, resourceAttributes, "service.name", "php-app")
     assertLogRecordHasAttribute(t, attributes, "sw.k8s.log.type", "container")
+    assertLogRecordDoNotHaveAttribute(t, attributes, "syslog.facility")
+    assertLogRecordDoNotHaveAttribute(t, attributes, "syslog.version")
+    assertLogRecordDoNotHaveAttribute(t, attributes, "syslog.procid")
+    assertLogRecordDoNotHaveAttribute(t, attributes, "syslog.msgid")
 
     transformedLogs2 := <-logsChan
     
@@ -475,13 +481,24 @@ func TestLogEventsTransformForFargateTwoDifferentContainers(t *testing.T) {
     assertLogRecordHasAttribute(t, resourceAttributes2, "k8s.pod.labels.pod-template-hash", "7657497f69")
     assertLogRecordHasAttribute(t, resourceAttributes2, "k8s.pod.annotations.CapacityProvisioned", "0.25vCPU 0.5GB")
     assertLogRecordHasAttribute(t, resourceAttributes2, "k8s.pod.annotations.Logging", "LoggingEnabled")
+    assertLogRecordHasAttribute(t, resourceAttributes2, "host.name", "php-app-7657497f69-1234")
+    assertLogRecordHasAttribute(t, resourceAttributes2, "service.name", "php-app")
     assertLogRecordHasAttribute(t, attributes2, "sw.k8s.log.type", "container")
+    assertLogRecordDoNotHaveAttribute(t, attributes2, "syslog.facility")
+    assertLogRecordDoNotHaveAttribute(t, attributes2, "syslog.version")
+    assertLogRecordDoNotHaveAttribute(t, attributes2, "syslog.procid")
+    assertLogRecordDoNotHaveAttribute(t, attributes2, "syslog.msgid")
 }
 
 func assertLogRecordHasAttribute(t *testing.T, attributes pdata.AttributeMap, key string, expectedValue string) {
     val, ok := attributes.Get(key)
     assert.True(t, ok)
     assert.Equal(t, expectedValue, val.StringVal())
+}
+
+func assertLogRecordDoNotHaveAttribute(t *testing.T, attributes pdata.AttributeMap, key string) {
+    _, ok := attributes.Get(key)
+    assert.False(t, ok)
 }
 
 func createCloudTrailCloudWatchEvent(logItemId, eventName, instanceId string) (evt events.CloudwatchLogsLogEvent) {

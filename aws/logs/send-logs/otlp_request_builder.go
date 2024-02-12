@@ -47,7 +47,7 @@ type OtlpRequestBuilder interface {
     SetKubernetesPodLabels(podLabels map[string]string) (OtlpRequestBuilder)
     SetKubernetesPodAnnotations(podAnnotations map[string]string) (OtlpRequestBuilder)
     SetKubernetesManifestVersion(manifestVersion string, defaultVersion string) (OtlpRequestBuilder)
-    SetSyslogAttributes(podName string, containerName string) (OtlpRequestBuilder)
+    SetOtelAttributes(podName string, containerName string) (OtlpRequestBuilder)
 }
 
 type otlpRequestBuilder struct {
@@ -217,9 +217,9 @@ func (rb * otlpRequestBuilder) SetKubernetesManifestVersion(manifestVersion stri
     return
 }
 
-func (rb * otlpRequestBuilder) SetSyslogAttributes(podName string, containerName string) (builder OtlpRequestBuilder) {
+func (rb * otlpRequestBuilder) SetOtelAttributes(podName string, containerName string) (builder OtlpRequestBuilder) {
     attrs := rb.resLogs.Resource().Attributes()
-    attrs.UpsertString("host.hostname", podName)
+    attrs.UpsertString("host.name", podName)
     attrs.UpsertString("service.name", containerName)
     builder = rb
     return

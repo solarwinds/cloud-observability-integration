@@ -292,10 +292,6 @@ func transformLogEvents(account, logGroup, logStream string, input []events.Clou
 
 				reqBuilder.AddLogEntry(item.ID, timestamp, k8sFargateLog.Log, ec2Event.getRegion(), map[string]interface{}{
 					"sw.k8s.log.type": k8sFargateLog.LogType,
-					"syslog.facility": 1, // user-level messages
-					"syslog.version": 1,
-					"syslog.procid": "1",
-					"syslog.msgid": logStream,
 				})
 			} else {
 				reqBuilder.AddLogEntry(item.ID, timestamp, item.Message, ec2Event.getRegion())
@@ -336,7 +332,7 @@ func setKubernetesInfo(reqBuilder OtlpRequestBuilder, k8sFargateLog *cloudInsigh
 		SetKubernetesPodLabels(k8sFargateLog.Kubernetes.Labels).
 		SetKubernetesPodAnnotations(k8sFargateLog.Kubernetes.Annotations).
 		SetKubernetesManifestVersion(k8sFargateLog.ManifestVersion, lambdaVersion).
-		SetSyslogAttributes(k8sFargateLog.Kubernetes.PodName, k8sFargateLog.Kubernetes.ContainerName)
+		SetOtelAttributes(k8sFargateLog.Kubernetes.PodName, k8sFargateLog.Kubernetes.ContainerName)
 }
 
 // test path in json object for existence of property. If `value` is provided it test also for the value to equal. Examples:
