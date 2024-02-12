@@ -2,41 +2,41 @@
     "eventVersion": "1.08",
     "userIdentity": {
         "type": "AssumedRole",
-        "principalId": "test",
-        "arn": "test",
-        "accountId": "test",
-        "accessKeyId": "test",
+        "principalId": "************:slingbotSession",
+        "arn": "arn:aws:sts::*************:assumed-role/*************/slingbotSession",
+        "accountId": "**********",
+        "accessKeyId": "ASIAR2KCIJZWSGTO7QE4",
         "sessionContext": {
             "sessionIssuer": {
                 "type": "Role",
-                "principalId": "test",
-                "arn": "test",
-                "accountId": "test",
-                "userName": "test"
+                "principalId": "AROAR2KCIJZW25OBX4XZV",
+                "arn": "arn:aws:iam::**********:role/**********",
+                "accountId": "**********",
+                "userName": "**********"
             },
             "webIdFederationData": {},
             "attributes": {
-                "creationDate": "1970-01-00T00:00:00Z",
+                "creationDate": "2022-08-04T14:06:37Z",
                 "mfaAuthenticated": "false"
             }
         }
     },
-    "eventTime": "1970-01-00T00:00:00Z",
+    "eventTime": "2022-08-04T14:06:39Z",
     "eventSource": "rds.amazonaws.com",
     "eventName": "DescribeDBInstances",
     "awsRegion": "eu-west-3",
-    "sourceIPAddress": "127.0.0.1",
-    "userAgent": "user-agent",
+    "sourceIPAddress": "**********",
+    "userAgent": "aws-sdk-java/2.17.50 Linux/5.4.172-90.336.amzn2.x86_64 OpenJDK_64-Bit_Server_VM/11.0.14+9 Java/11.0.14 kotlin vendor/Eclipse_Adoptium io/sync http/Apache cfg/retry-mode/legacy",
     "requestParameters": {
         "maxRecords": 100
     },
     "responseElements": null,
-    "requestID": "test",
-    "eventID": "test",
+    "requestID": "4e032fa5-1882-4fd0-8bfc-**********",
+    "eventID": "433dc01d-7783-42c0-9194-**********",
     "readOnly": true,
     "eventType": "AwsApiCall",
     "managementEvent": true,
-    "recipientAccountId": "test",
+    "recipientAccountId": "**********",
     "eventCategory": "Management",
     "tlsDetails": {
         "tlsVersion": "TLSv1.2",
