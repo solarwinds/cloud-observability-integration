@@ -8,7 +8,7 @@ Metadata:
     ReadmeUrl: README.md
     Labels: ['CloudWatch', 'Logs', 'AWS', 'Observability', 'OTEL']
     HomePageUrl: http://www.solarwinds.com
-    SemanticVersion: 0.0.8
+    SemanticVersion: 0.0.9
     SourceCodeUrl: https://github.com/solarwinds/cloud-observability-integration/tree/master/aws/logs
 
 AWSTemplateFormatVersion: '2010-09-09'
@@ -19,12 +19,12 @@ Description: >
 # More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
 Globals:
   Function:
-    Timeout: 5
+    Timeout: 60
 
 Parameters:
   OtlpEndpoint:
     Type: String
-    Default: otel-collector.dc-01.cloud.solarwinds.com:443
+    Default: otel.collector.na-01.cloud.solarwinds.com:443
   ApiToken:
     Type: String
     Default: ''
@@ -47,7 +47,7 @@ Resources:
 
 Outputs:
   SendLogsFunction:
-    Description: " SolarWinds Observability Logs function ARN"
+    Description: "SolarWinds Observability Logs function ARN"
     Value: !GetAtt SendLogsFunction.Arn
   SendLogsFunctionIamRole:
     Description: "Implicit IAM Role created for SolarWinds Observability Logs function"
