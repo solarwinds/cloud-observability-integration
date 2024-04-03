@@ -8,7 +8,7 @@ Metadata:
     ReadmeUrl: README.md
     Labels: ['CloudWatch', 'Logs', 'AWS', 'Observability', 'OTEL']
     HomePageUrl: http://www.solarwinds.com
-    SemanticVersion: 0.0.9
+    SemanticVersion: 0.0.10
     SourceCodeUrl: https://github.com/solarwinds/cloud-observability-integration/tree/master/aws/logs
 
 AWSTemplateFormatVersion: '2010-09-09'
@@ -35,7 +35,7 @@ Resources:
     Properties:
       CodeUri: send-logs/
       Handler: main
-      Runtime: go1.x
+      Runtime: provided.al2023
       Architectures:
         - x86_64
       Tracing: Active # https://docs.aws.amazon.com/lambda/latest/dg/lambda-x-ray.html
