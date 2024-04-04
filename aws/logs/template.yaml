@@ -8,7 +8,7 @@ Metadata:
     ReadmeUrl: README.md
     Labels: ['CloudWatch', 'Logs', 'AWS', 'Observability', 'OTEL']
     HomePageUrl: http://www.solarwinds.com
-    SemanticVersion: 0.0.10
+    SemanticVersion: 0.0.11
     SourceCodeUrl: https://github.com/solarwinds/cloud-observability-integration/tree/master/aws/logs
 
 AWSTemplateFormatVersion: '2010-09-09'
