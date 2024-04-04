@@ -118,7 +118,7 @@ cd .aws-sam/build
 sam package --template-file template.yaml --output-template-file packaged.yaml --s3-bucket <your S3 bucket>
 sam publish --template-file packaged.yaml
 ```
-At first, the `sam build` command produces output in `.aws-sam/build` directory. The directory includes the processed `template.yaml` file and the compiled lambda function `SendLogsFunction/main`.
+At first, the `sam build` command produces output in `.aws-sam/build` directory. The directory includes the processed `template.yaml` file and the compiled lambda function `SendLogsFunction/bootstrap`.
 
 After building, it is necessary to change to `.aws-sam/build` before you run any subsequent commands.
 
