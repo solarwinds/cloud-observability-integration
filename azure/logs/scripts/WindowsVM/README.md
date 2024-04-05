@@ -7,7 +7,7 @@ Required arguments:
 
 - `$vmResourceGroup` Virtual machine resource group
 
-- `$storageAccountName` Name of the Storage account. If the SolarWinds log processing pipeline was created using [default parameters](../../template/deploy-swi-azure-logs-forwarder.ps1), the storage account name is `fnstorswilogs`.
+- `$storageAccountName` Name of the Storage account that was created using [default parameters](../../template/deploy-swi-azure-logs-forwarder.ps1)
 
 - `$storageAccountKey` API key for accessing storage account. You can copy its value from the Azure Portal. Go to "Your Storage Account" > "Access keys" and copy key1.
 
