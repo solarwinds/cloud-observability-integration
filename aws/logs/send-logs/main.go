@@ -48,7 +48,7 @@ const (
 
 const (
 	awsLambdaFunctionNameVar = "AWS_LAMBDA_FUNCTION_NAME"
-	awsExecutionEnvVar       = "AWS_EXECUTION_ENV"
+	awsLambdaInitTypeVar     = "AWS_LAMBDA_INITIALIZATION_TYPE"
 	awsRegionVar             = "AWS_REGION"
 	awsFunctionVersion       = "AWS_LAMBDA_FUNCTION_VERSION"
 	otlpEndpointVar          = "OTLP_ENDPOINT"
@@ -60,7 +60,7 @@ const (
 var (
 	runningTests                       = false
 	functionName                string = os.Getenv(awsLambdaFunctionNameVar)
-	executingInAWS              bool   = strings.Contains(os.Getenv(awsExecutionEnvVar), "AWS_Lambda_")
+	_, executingInAWS                  = os.LookupEnv(awsLambdaInitTypeVar)
 	lambdaRegion                string = os.Getenv(awsRegionVar)
 	lambdaVersion               string = os.Getenv(awsFunctionVersion)
 	useEncryption                      = executingInAWS && strings.EqualFold(os.Getenv(useEncryptionVar), "yes")
