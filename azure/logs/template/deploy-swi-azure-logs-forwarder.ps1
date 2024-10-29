@@ -43,6 +43,7 @@ $deploymentArgs = @{
 
 try {
     New-AzResourceGroupDeployment @deploymentArgs -Verbose -ErrorAction Stop
+    Write-Host "Deployment successful" -ForegroundColor Green -BackgroundColor Black
 } catch {
     Write-Error "Deployment failed"
     Write-Error $_
