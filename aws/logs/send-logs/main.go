@@ -33,8 +33,8 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/kms"
-	"go.opentelemetry.io/collector/model/otlpgrpc"
-	"go.opentelemetry.io/collector/model/pdata"
+	"go.opentelemetry.io/collector/pdata/plog"
+	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
@@ -219,16 +219,15 @@ func handleEvent(ctx context.Context, event events.CloudwatchLogsEvent) (r strin
 
 	defer conn.Close()
 
-	logsClient := otlpgrpc.NewLogsClient(conn)
-	logsChan := make(chan pdata.Logs)
+	logsClient := plogotlp.NewGRPCClient(conn)
+	logsChan := make(chan plog.Logs)
 	go transformLogEvents(datareq.Owner, datareq.LogGroup, datareq.LogStream, datareq.LogEvents, logsChan)
 
 	errs := make([]error, 0)
 	ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+apiToken)
 
 	for logsData := range logsChan {
-		logRequest := otlpgrpc.NewLogsRequest()
-		logRequest.SetLogs(logsData)
+		logRequest := plogotlp.NewExportRequestFromLogs(logsData)
 		_, err = logsClient.Export(ctx, logRequest)
 		if err != nil {
 			appLogger.Error("While exporting log data: ", err.Error())
@@ -245,7 +244,7 @@ func handleEvent(ctx context.Context, event events.CloudwatchLogsEvent) (r strin
 	return r, err
 }
 
-func transformLogEvents(account, logGroup, logStream string, input []events.CloudwatchLogsLogEvent, output chan pdata.Logs) {
+func transformLogEvents(account, logGroup, logStream string, input []events.CloudwatchLogsLogEvent, output chan plog.Logs) {
 	defer close(output)
 	reqBuilder := NewOtlpRequestBuilder().
 		SetCloudAccount(account).
