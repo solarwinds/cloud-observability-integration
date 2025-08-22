@@ -23,6 +23,8 @@ import (
 	"os"
 	"regexp"
 	"send-logs/logger"
+	"send-logs/vpc_flow_logs"
+	"strconv"
 	"strings"
 
 	"encoding/base64"
@@ -35,6 +37,8 @@ import (
 	"github.com/aws/aws-sdk-go/service/kms"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
+	"go.opentelemetry.io/collector/pdata/pmetric"
+	"go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
@@ -55,6 +59,10 @@ const (
 	apiTokenVar              = "API_TOKEN"
 	useEncryptionVar         = "USE_ENCRYPTION"
 	timestampMultiplier      = 1000000 // AWS Logs timestamp is in millisends since Jan 1 , 1970, OTEL Collector timestamp is in nanoseconds
+	enableVpcFlowLogs        = "ENABLE_VPC_FLOW_LOGS"
+	vpcLogGroupName          = "VPC_LOG_GROUP_NAME"
+	logLevel                 = "LOG_LEVEL"
+	vpcDebugInterval         = "VPC_DEBUG_INTERVAL" // How often to log full JSON (every Nth record)
 )
 
 var (
@@ -68,10 +76,14 @@ var (
 	apiToken                    string = os.Getenv(apiTokenVar)     // encrypted when AWS_EXECUTION_ENV contains 'AWS_Lambda_'
 	appLogger                          = logger.NewLogger("send-logs")
 	kmsClient                   *kms.KMS
-	detectInstanceNameAndRegion = regexp.MustCompile(`(?P<Fargate>(fargate-))?(?P<Instance>(i-|ip-)[\w\-]+)\.(?P<Region>[\w\-]+)\.`)
-	instanceParamIndex          = detectInstanceNameAndRegion.SubexpIndex("Instance")
-	regionParamIndex            = detectInstanceNameAndRegion.SubexpIndex("Region")
-	fargateParamIndex           = detectInstanceNameAndRegion.SubexpIndex("Fargate")
+	detectInstanceNameAndRegion        = regexp.MustCompile(`(?P<Fargate>(fargate-))?(?P<Instance>(i-|ip-)[\w\-]+)\.(?P<Region>[\w\-]+)\.`)
+	instanceParamIndex                 = detectInstanceNameAndRegion.SubexpIndex("Instance")
+	regionParamIndex                   = detectInstanceNameAndRegion.SubexpIndex("Region")
+	fargateParamIndex                  = detectInstanceNameAndRegion.SubexpIndex("Fargate")
+	enableVpcLogs               bool   = strings.EqualFold(os.Getenv(enableVpcFlowLogs), "yes")
+	vpcLogGrpName               string = os.Getenv(vpcLogGroupName)
+	isDebugEnabled              bool   = strings.EqualFold(os.Getenv(logLevel), "DEBUG")
+	vpcDebugIntervalValue       int    = getVpcDebugInterval()
 )
 
 type cloudTrailEvent struct {
@@ -147,6 +159,10 @@ func init() {
 		appLogger.Fatal(fmt.Sprintf("Function execution parameters are not configured. Please set and encrypt %s and %s environmet variables", otlpEndpointVar, apiTokenVar))
 	}
 
+	if enableVpcLogs && vpcLogGrpName == "" {
+		appLogger.Fatal(fmt.Sprintf("Function execution parameters are not configured. Please set %s environmet variable", vpcLogGroupName))
+	}
+
 	if !useEncryption {
 		// not depolyed to AWS or USE_ENCRYPTION != yes, skip decryption
 		appLogger.Info("Skipping parameter decryption.")
@@ -175,6 +191,35 @@ func decodeString(encrypted string) string {
 	}
 
 	return string(response.Plaintext[:])
+}
+
+// getVpcDebugInterval parses the VPC_DEBUG_INTERVAL environment variable
+// Returns a safe default of 100 if not set or invalid
+func getVpcDebugInterval() int {
+	intervalStr := os.Getenv(vpcDebugInterval)
+	if intervalStr == "" {
+		return 100 // Default: log full JSON every 100th record
+	}
+
+	interval, err := strconv.Atoi(intervalStr)
+	if err != nil {
+		appLogger.Error(fmt.Sprintf("VPC_DEBUG_INTERVAL: unable to parse '%s' as number, using default 100", intervalStr))
+		return 100
+	}
+
+	// Check boundary conditions with specific error messages
+	if interval < 1 {
+		appLogger.Error(fmt.Sprintf("VPC_DEBUG_INTERVAL can't be less than 1, got %d, using default 100", interval))
+		return 100
+	}
+
+	// Set reasonable upper bounds
+	if interval > 10000 {
+		appLogger.Error(fmt.Sprintf("VPC_DEBUG_INTERVAL too large (max 10000), got %d, capping at 10000", interval))
+		return 10000
+	}
+
+	return interval
 }
 
 func extractEC2InstanceId(ec2Event *ec2CloudTrailEvent) (instanceId string, err error) {
@@ -219,19 +264,46 @@ func handleEvent(ctx context.Context, event events.CloudwatchLogsEvent) (r strin
 
 	defer conn.Close()
 
-	logsClient := plogotlp.NewGRPCClient(conn)
-	logsChan := make(chan plog.Logs)
-	go transformLogEvents(datareq.Owner, datareq.LogGroup, datareq.LogStream, datareq.LogEvents, logsChan)
-
 	errs := make([]error, 0)
 	ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+apiToken)
 
-	for logsData := range logsChan {
-		logRequest := plogotlp.NewExportRequestFromLogs(logsData)
-		_, err = logsClient.Export(ctx, logRequest)
-		if err != nil {
-			appLogger.Error("While exporting log data: ", err.Error())
-			errs = append(errs, err)
+	// Check if this is a VPC log group
+	if datareq.LogGroup == vpcLogGrpName {
+		if enableVpcLogs {
+			// Process VPC flow logs as metrics
+			metricsClient := pmetricotlp.NewGRPCClient(conn)
+			vpcLogChan := make(chan pmetric.Metrics)
+
+			// process VPC flow logs using the handler with channel pattern
+			vpcHandler := vpc_flow_logs.NewHandler(isDebugEnabled, vpcDebugIntervalValue)
+			go vpcHandler.TransformVpcFlowLogs(datareq.Owner, datareq.LogGroup, datareq.LogStream, datareq.LogEvents, vpcLogChan)
+
+			for processedMetric := range vpcLogChan {
+				metricRequest := pmetricotlp.NewExportRequestFromMetrics(processedMetric)
+				_, err := metricsClient.Export(ctx, metricRequest)
+				if err != nil {
+					appLogger.Error("While exporting metric data: ", err.Error())
+					errs = append(errs, err)
+				}
+			}
+		} else {
+			// VPC logs received but VPC processing is disabled - skip processing
+			appLogger.Info(fmt.Sprintf("Received VPC flow logs from log group '%s' but VPC processing is disabled (ENABLE_VPC_FLOW_LOGS=false). Skipping processing.", datareq.LogGroup))
+		}
+	} else {
+		// Process regular logs
+		logsClient := plogotlp.NewGRPCClient(conn)
+		logsChan := make(chan plog.Logs)
+
+		go transformLogEvents(datareq.Owner, datareq.LogGroup, datareq.LogStream, datareq.LogEvents, logsChan)
+
+		for logsData := range logsChan {
+			logRequest := plogotlp.NewExportRequestFromLogs(logsData)
+			_, err = logsClient.Export(ctx, logRequest)
+			if err != nil {
+				appLogger.Error("While exporting log data: ", err.Error())
+				errs = append(errs, err)
+			}
 		}
 	}
 	if len(errs) == 0 {
