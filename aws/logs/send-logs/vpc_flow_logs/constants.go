@@ -22,8 +22,8 @@ const (
 	VpcFlowLogsSupportedVersion    = "2"
 
 	// Telemetry names
-	BytesMetricName   = "sw.cloud.vpc.bytes"
-	PacketsMetricName = "sw.cloud.vpc.packets"
+	BytesMetricName   = "AWS.VPC.Flows.Bytes"
+	PacketsMetricName = "AWS.VPC.Flows.Packets"
 
 	// Telemetry units
 	BytesUnit = "Bytes"
