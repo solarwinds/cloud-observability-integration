@@ -28,6 +28,9 @@ Parameters:
   ApiToken:
     Type: String
     Default: ''
+  VpcFlowLogGroupName:
+    Type: String
+    Default: ''
 
 Resources:
   SendLogsFunction:
@@ -46,8 +49,7 @@ Resources:
           USE_ENCRYPTION: "no"
           OTLP_ENDPOINT: !Sub '${OtlpEndpoint}'
           API_TOKEN: !Sub '${ApiToken}'
-          ENABLE_VPC_FLOW_LOGS: "no"
-          VPC_LOG_GROUP_NAME: ""
+          VPC_LOG_GROUP_NAME: !Sub '${VpcFlowLogGroupName}'
           LOG_LEVEL: "INFO"
           VPC_DEBUG_INTERVAL: "100"
 

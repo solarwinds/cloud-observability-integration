@@ -59,7 +59,6 @@ const (
 	apiTokenVar              = "API_TOKEN"
 	useEncryptionVar         = "USE_ENCRYPTION"
 	timestampMultiplier      = 1000000 // AWS Logs timestamp is in millisends since Jan 1 , 1970, OTEL Collector timestamp is in nanoseconds
-	enableVpcFlowLogs        = "ENABLE_VPC_FLOW_LOGS"
 	vpcLogGroupName          = "VPC_LOG_GROUP_NAME"
 	logLevel                 = "LOG_LEVEL"
 	vpcDebugInterval         = "VPC_DEBUG_INTERVAL" // How often to log full JSON (every Nth record)
@@ -80,7 +79,6 @@ var (
 	instanceParamIndex                 = detectInstanceNameAndRegion.SubexpIndex("Instance")
 	regionParamIndex                   = detectInstanceNameAndRegion.SubexpIndex("Region")
 	fargateParamIndex                  = detectInstanceNameAndRegion.SubexpIndex("Fargate")
-	enableVpcLogs               bool   = strings.EqualFold(os.Getenv(enableVpcFlowLogs), "yes")
 	vpcLogGrpName               string = os.Getenv(vpcLogGroupName)
 	isDebugEnabled              bool   = strings.EqualFold(os.Getenv(logLevel), "DEBUG")
 	vpcDebugIntervalValue       int    = getVpcDebugInterval()
@@ -157,10 +155,6 @@ func init() {
 
 	if endpoint == "" || apiToken == "" {
 		appLogger.Fatal(fmt.Sprintf("Function execution parameters are not configured. Please set and encrypt %s and %s environmet variables", otlpEndpointVar, apiTokenVar))
-	}
-
-	if enableVpcLogs && vpcLogGrpName == "" {
-		appLogger.Fatal(fmt.Sprintf("Function execution parameters are not configured. Please set %s environmet variable", vpcLogGroupName))
 	}
 
 	if !useEncryption {
@@ -269,26 +263,21 @@ func handleEvent(ctx context.Context, event events.CloudwatchLogsEvent) (r strin
 
 	// Check if this is a VPC log group
 	if datareq.LogGroup == vpcLogGrpName {
-		if enableVpcLogs {
-			// Process VPC flow logs as metrics
-			metricsClient := pmetricotlp.NewGRPCClient(conn)
-			vpcLogChan := make(chan pmetric.Metrics)
+		// Process VPC flow logs as metrics
+		metricsClient := pmetricotlp.NewGRPCClient(conn)
+		vpcLogChan := make(chan pmetric.Metrics)
 
-			// process VPC flow logs using the handler with channel pattern
-			vpcHandler := vpc_flow_logs.NewHandler(isDebugEnabled, vpcDebugIntervalValue)
-			go vpcHandler.TransformVpcFlowLogs(datareq.Owner, datareq.LogGroup, datareq.LogStream, datareq.LogEvents, vpcLogChan)
+		// process VPC flow logs using the handler with channel pattern
+		vpcHandler := vpc_flow_logs.NewHandler(isDebugEnabled, vpcDebugIntervalValue)
+		go vpcHandler.TransformVpcFlowLogs(datareq.Owner, datareq.LogGroup, datareq.LogStream, datareq.LogEvents, vpcLogChan)
 
-			for processedMetric := range vpcLogChan {
-				metricRequest := pmetricotlp.NewExportRequestFromMetrics(processedMetric)
-				_, err := metricsClient.Export(ctx, metricRequest)
-				if err != nil {
-					appLogger.Error("While exporting metric data: ", err.Error())
-					errs = append(errs, err)
-				}
+		for processedMetric := range vpcLogChan {
+			metricRequest := pmetricotlp.NewExportRequestFromMetrics(processedMetric)
+			_, err := metricsClient.Export(ctx, metricRequest)
+			if err != nil {
+				appLogger.Error("While exporting metric data: ", err.Error())
+				errs = append(errs, err)
 			}
-		} else {
-			// VPC logs received but VPC processing is disabled - skip processing
-			appLogger.Info(fmt.Sprintf("Received VPC flow logs from log group '%s' but VPC processing is disabled (ENABLE_VPC_FLOW_LOGS=false). Skipping processing.", datareq.LogGroup))
 		}
 	} else {
 		// Process regular logs

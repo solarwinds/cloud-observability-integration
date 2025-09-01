@@ -118,7 +118,7 @@ func TestParseFlowLogRecord_WithTestData(t *testing.T) {
 
 				validationErr, ok := err.(*ValidationError)
 				if ok {
-					assert.Equal(t, VersionKey, validationErr.Field, "Error should be for version field")
+					assert.Equal(t, ConvertKeyToAWSFieldName(VersionKey), validationErr.Field, "Error should be for version field")
 				}
 			})
 		}
@@ -136,7 +136,7 @@ func TestParseFlowLogRecord_WithTestData(t *testing.T) {
 
 				validationErr, ok := err.(*ValidationError)
 				if ok {
-					assert.Equal(t, AccountIDKey, validationErr.Field, "Error should be for account ID field")
+					assert.Equal(t, ConvertKeyToAWSFieldName(AccountIDKey), validationErr.Field, "Error should be for account ID field")
 				}
 			})
 		}
@@ -154,7 +154,7 @@ func TestParseFlowLogRecord_WithTestData(t *testing.T) {
 
 				validationErr, ok := err.(*ValidationError)
 				if ok {
-					assert.Equal(t, ActionKey, validationErr.Field, "Error should be for action field")
+					assert.Equal(t, ConvertKeyToAWSFieldName(ActionKey), validationErr.Field, "Error should be for action field")
 				}
 			})
 		}
@@ -172,7 +172,7 @@ func TestParseFlowLogRecord_WithTestData(t *testing.T) {
 
 				validationErr, ok := err.(*ValidationError)
 				if ok {
-					assert.Equal(t, LogStatusKey, validationErr.Field, "Error should be for log status field")
+					assert.Equal(t, ConvertKeyToAWSFieldName(LogStatusKey), validationErr.Field, "Error should be for log status field")
 				}
 			})
 		}
