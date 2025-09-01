@@ -8,7 +8,7 @@ Metadata:
     ReadmeUrl: README.md
     Labels: ['CloudWatch', 'Logs', 'AWS', 'Observability', 'OTEL']
     HomePageUrl: http://www.solarwinds.com
-    SemanticVersion: 0.0.12
+    SemanticVersion: 0.0.13
     SourceCodeUrl: https://github.com/solarwinds/cloud-observability-integration/tree/master/aws/logs
 
 AWSTemplateFormatVersion: '2010-09-09'
@@ -26,6 +26,9 @@ Parameters:
     Type: String
     Default: otel.collector.na-01.cloud.solarwinds.com:443
   ApiToken:
+    Type: String
+    Default: ''
+  VpcFlowLogGroupName:
     Type: String
     Default: ''
 
@@ -46,6 +49,9 @@ Resources:
           USE_ENCRYPTION: "no"
           OTLP_ENDPOINT: !Sub '${OtlpEndpoint}'
           API_TOKEN: !Sub '${ApiToken}'
+          VPC_LOG_GROUP_NAME: !Sub '${VpcFlowLogGroupName}'
+          LOG_LEVEL: "INFO"
+          VPC_DEBUG_INTERVAL: "100"
 
 Outputs:
   SendLogsFunction:
