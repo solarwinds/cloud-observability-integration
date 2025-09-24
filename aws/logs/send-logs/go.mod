@@ -2,7 +2,6 @@ require (
 	github.com/aws/aws-lambda-go v1.49.0
 	github.com/aws/aws-sdk-go v1.55.8
 	github.com/stretchr/testify v1.10.0
-	go.opentelemetry.io/collector/model v0.40.0
 	go.opentelemetry.io/collector/pdata v1.38.0
 	go.opentelemetry.io/collector/semconv v0.128.0
 	google.golang.org/grpc v1.75.0
@@ -29,3 +28,5 @@ require (
 module send-logs
 
 go 1.23.6
+
+toolchain go1.23.12
