@@ -8,23 +8,14 @@ Metadata:
     ReadmeUrl: README.md
     Labels: ['CloudWatch', 'Logs', 'AWS', 'Observability', 'OTEL']
     HomePageUrl: http://www.solarwinds.com
-    # The SemanticVersion is retrieved from the Mappings section to centralize version management.
-    # This avoids duplication and ensures consistency across the template.
-    SemanticVersion: !FindInMap [ApplicationConfig, Version, Number]
+    # IMPORTANT: When updating SemanticVersion, also update the SWIVersion tag value for the Lambda function below to keep them in sync.
+    SemanticVersion: 0.0.14
     SourceCodeUrl: https://github.com/solarwinds/cloud-observability-integration/tree/master/aws/logs
 
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
   Send CloudWatch Logs to OTEL Collector endpoint (otlp/GRPc)
-
-# Application version mapping for centralized version management.
-# This mapping is part of the template and ensures consistency for version references.
-# To update the application version, change the value here.
-Mappings:
-  ApplicationConfig:
-    Version:
-      Number: 0.0.14
 
 # More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
 Globals:
@@ -63,7 +54,7 @@ Resources:
           LOG_LEVEL: "INFO"
           VPC_DEBUG_INTERVAL: "100"
       Tags:
-        SWIVersion: !FindInMap [ApplicationConfig, Version, Number]
+        SWIVersion: 0.0.14
         SWIVpcLogGroup: !Ref VpcFlowLogGroupName
 
 Outputs:
