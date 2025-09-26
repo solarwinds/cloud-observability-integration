@@ -9,7 +9,7 @@ Metadata:
     Labels: ['CloudWatch', 'Logs', 'AWS', 'Observability', 'OTEL']
     HomePageUrl: http://www.solarwinds.com
     # IMPORTANT: When updating SemanticVersion, also update the SWIVersion tag value for the Lambda function below to keep them in sync.
-    SemanticVersion: 0.0.14
+    SemanticVersion: 0.0.15
     SourceCodeUrl: https://github.com/solarwinds/cloud-observability-integration/tree/master/aws/logs
 
 AWSTemplateFormatVersion: '2010-09-09'
@@ -54,7 +54,7 @@ Resources:
           LOG_LEVEL: "INFO"
           VPC_DEBUG_INTERVAL: "100"
       Tags:
-        SWIVersion: 0.0.14
+        SWIVersion: 0.0.15
         SWIVpcLogGroup: !Ref VpcFlowLogGroupName
 
 Outputs:
