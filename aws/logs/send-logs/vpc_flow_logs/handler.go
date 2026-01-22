@@ -16,51 +16,150 @@
 package vpc_flow_logs
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
-	"strings"
 	"time"
-	"unicode"
 
 	"send-logs/logger"
 
 	"github.com/aws/aws-lambda-go/events"
-	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
 	"go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp"
-	semconv "go.opentelemetry.io/collector/semconv/v1.27.0"
 )
 
 var handlerLogger = logger.NewLogger("vpc-flow-logs-handler")
 
-// Handler handles VPC Flow Log processing with debug capabilities
+// flowLogFormatGetter is a function type for retrieving flow log format
+type flowLogFormatGetter func(logGroupName string) (string, string, int, error)
+
+// Handler handles VPC Flow Log processing with debug capabilities and in-memory caching
 type Handler struct {
-	isDebugEnabled    bool // Enable debug logging
-	debugCounter      int  // Counter for debug sampling
-	fullDebugInterval int  // How often to log full JSON (every Nth record)
+	isDebugEnabled    bool                // Enable debug logging
+	debugCounter      int                 // Counter for debug sampling
+	fullDebugInterval int                 // How often to log full JSON (every Nth record)
+	formatCache       *flowLogFormatCache // In-memory cache for flow log formats
+	getFlowLogFormat  flowLogFormatGetter // Function to get flow log format (can be mocked in tests)
 }
 
-// NewHandler creates a new VPC flow log handler with configurable debug interval
-func NewHandler(isDebugEnabled bool, fullDebugInterval int) *Handler {
+// NewHandler creates a new VPC flow log handler with configurable debug interval and cache TTL
+func NewHandler(isDebugEnabled bool, fullDebugInterval int, cacheTTL time.Duration) *Handler {
 	if fullDebugInterval <= 0 {
 		fullDebugInterval = 100 // Safe default
 	}
-	return &Handler{
+	if cacheTTL <= 0 {
+		cacheTTL = 10 * time.Minute // Default cache TTL
+	}
+
+	// Create the handler with in-memory cache
+	handler := &Handler{
 		isDebugEnabled:    isDebugEnabled,
 		debugCounter:      0,
 		fullDebugInterval: fullDebugInterval,
+		formatCache:       newFlowLogFormatCache(cacheTTL, isDebugEnabled),
 	}
+
+	// Set up the format getter to use the cache
+	handler.getFlowLogFormat = func(logGroupName string) (string, string, int, error) {
+		return handler.getFlowLogFormatCached(logGroupName)
+	}
+
+	return handler
+}
+
+// getFlowLogFormatCached retrieves flow log format with caching support
+// It first checks the cache, and only makes an EC2 API call if the cache is empty or expired
+func (h *Handler) getFlowLogFormatCached(logGroupName string) (string, string, int, error) {
+	// Try to get from cache first
+	if logFormat, flowLogId, flowLogsCount, found := h.formatCache.get(logGroupName); found {
+		return logFormat, flowLogId, flowLogsCount, nil
+	}
+
+	// Cache miss or expired, query EC2
+	logFormat, flowLogId, flowLogsCount, err := getFlowLogFormat(logGroupName)
+	if err != nil {
+		return "", "", 0, err
+	}
+
+	// Store in cache for future use
+	h.formatCache.set(logGroupName, logFormat, flowLogId, flowLogsCount)
+
+	return logFormat, flowLogId, flowLogsCount, nil
+}
+
+// isDefaultFormat checks if the format string represents AWS default format (version 2)
+// Returns true if format is empty (no EC2 query was made) or matches the default format string exactly
+func isDefaultFormat(format string) bool {
+	return format == "" || format == VpcFlowLogsDefaultFormatString
 }
 
 // TransformVpcFlowLogs processes VPC flow log events and sends them to a metrics channel
-func (h *Handler) TransformVpcFlowLogs(account, logGroup, logStream string, input []events.CloudwatchLogsLogEvent, output chan pmetric.Metrics) {
+// Context is used to handle cancellation (e.g., Lambda timeout)
+func (h *Handler) TransformVpcFlowLogs(ctx context.Context, account, logGroup, logStream string, input []events.CloudwatchLogsLogEvent, output chan pmetric.Metrics) {
 	defer close(output)
 
-	for _, logEvent := range input {
-		record, err := h.parseFlowLogRecord(logEvent.Message)
+	flowLogsFormat := ""
+	// Only query for log format if not using default version 2
+	if VpcFlowLogsSupportedVersion != VpcFlowLogsDefaultVersion {
+		var (
+			err           error
+			flowLogsCount int
+			flowLogId     string
+		)
+		// Query EC2 for flow log format (uses injected function, can be mocked in tests)
+		flowLogsFormat, flowLogId, flowLogsCount, err = h.getFlowLogFormat(logGroup)
+
 		if err != nil {
-			handlerLogger.Error("Failed to parse VPC flow log record: ", err.Error())
+			handlerLogger.Error("While getting flow log format: ", err.Error())
+			return
+		}
+		if h.isDebugEnabled {
+			handlerLogger.Info("LogFormat: ", flowLogsFormat)
+
+			if flowLogsCount > 1 && h.isDebugEnabled {
+				// Log a warning if multiple flow logs are found for the same log group
+				handlerLogger.Info(fmt.Sprintf("WARNING: Multiple flow logs found for log group: %s. Using the first one (%s).", logGroup, flowLogId))
+			}
+		}
+	}
+
+	// Log parser selection ONCE before processing (avoids N log lines for N records)
+	if h.isDebugEnabled {
+		parserType := "DEFAULT (optimized, no reflection)"
+		if !isDefaultFormat(flowLogsFormat) {
+			parserType = fmt.Sprintf("CUSTOM (reflection-based). Format: %s", flowLogsFormat)
+		}
+		handlerLogger.Info(fmt.Sprintf("Using %s parser for %d records", parserType, len(input)))
+	}
+
+	for _, logEvent := range input {
+		// Check for context cancellation (e.g., Lambda timeout)
+		select {
+		case <-ctx.Done():
+			handlerLogger.Error("Context cancelled, stopping VPC flow log processing: ", ctx.Err().Error())
+			return
+		default:
+			// Continue processing
+		}
+
+		var (
+			record *FlowLogRecord
+			err    error
+		)
+		// Determine which parser to use based on the actual format string from EC2
+		// If format is empty (version 2, no EC2 query) or matches AWS default, use optimized default parser (no reflection)
+		// Otherwise use custom parser which handles any field order via reflection
+		if isDefaultFormat(flowLogsFormat) {
+			record, err = h.parseFlowLogRecordDefault(logEvent.Message)
+		} else {
+			record, err = h.parseFlowLogRecordCustom(logEvent.Message, flowLogsFormat)
+		}
+		if err != nil || record == nil {
+			if err != nil {
+				handlerLogger.Error("Failed to parse VPC flow log record: ", err.Error())
+			} else {
+				handlerLogger.Error("Failed to parse VPC flow log record: record is nil")
+			}
 			continue
 		}
 
@@ -96,204 +195,4 @@ func (h *Handler) TransformVpcFlowLogs(account, logGroup, logStream string, inpu
 		// Send processed metrics to output channel
 		output <- metrics
 	}
-}
-
-// parseFlowLogRecord parses an AWS VPC Flow Log message (default format) into a FlowLogRecord
-func (h *Handler) parseFlowLogRecord(message string) (*FlowLogRecord, error) {
-	fields := strings.Fields(message)
-
-	// Validate field count for AWS default format (must be exactly 14 fields)
-	if len(fields) != VpcFlowLogsSupportedFieldCount {
-		if h.isDebugEnabled {
-			handlerLogger.Error(fmt.Sprintf("Malformed VPC flow log message: expected exactly %d fields, got %d. Message: %q", VpcFlowLogsSupportedFieldCount, len(fields), message))
-		}
-		errorMessage := "Invalid field count in VPC flow log"
-		if len(fields) < VpcFlowLogsSupportedFieldCount {
-			errorMessage = "Insufficient fields in VPC flow log"
-		} else {
-			errorMessage = "Too many fields in VPC flow log"
-		}
-		return nil, &ParseError{
-			Message:  errorMessage,
-			Expected: VpcFlowLogsSupportedFieldCount,
-			Actual:   len(fields),
-		}
-	}
-
-	// Parse according to AWS default format:
-	// ${version} ${account-id} ${interface-id} ${srcaddr} ${dstaddr} ${srcport} ${dstport} ${protocol} ${packets} ${bytes} ${start} ${end} ${action} ${log-status}
-	logRecord := &FlowLogRecord{
-		Version:         fields[0],              // VPC Flow Log version
-		AccountID:       fields[1],              // AWS account ID
-		InterfaceID:     fields[2],              // Network interface ID
-		SourceAddr:      fields[3],              // Source IP address
-		DestinationAddr: fields[4],              // Destination IP address
-		SourcePort:      fields[5],              // Source port
-		DestinationPort: fields[6],              // Destination port
-		Protocol:        fields[7],              // Protocol number
-		Packets:         parseInt64(fields[8]),  // Number of packets
-		Bytes:           parseInt64(fields[9]),  // Number of bytes
-		Start:           parseInt64(fields[10]), // Window start time
-		End:             parseInt64(fields[11]), // Window end time
-		Action:          fields[12],             // ACCEPT or REJECT
-		LogStatus:       fields[13],             // OK, NODATA, or SKIPDATA
-	}
-
-	// Validate critical fields
-	if err := h.validateFlowLogRecord(logRecord); err != nil {
-		return nil, err
-	}
-
-	return logRecord, nil
-}
-
-// validateFlowLogRecord validates critical fields in the VPC Flow Log record
-func (h *Handler) validateFlowLogRecord(record *FlowLogRecord) error {
-	// Validate version (should be "2" for default format)
-	if record.Version != VpcFlowLogsSupportedVersion {
-		return &ValidationError{
-			Field:    ConvertKeyToAWSFieldName(VersionKey),
-			Expected: VpcFlowLogsSupportedVersion,
-			Actual:   record.Version,
-			Message:  "Unsupported VPC Flow Log version",
-		}
-	}
-
-	// Validate account ID (should be 12 digits)
-	if len(record.AccountID) != 12 {
-		return &ValidationError{
-			Field:   ConvertKeyToAWSFieldName(AccountIDKey),
-			Actual:  record.AccountID,
-			Message: "Invalid AWS account ID format (expected 12 digits)",
-		}
-	}
-
-	// Validate that account ID contains only digits
-	for _, r := range record.AccountID {
-		if r < '0' || r > '9' {
-			return &ValidationError{
-				Field:   ConvertKeyToAWSFieldName(AccountIDKey),
-				Actual:  record.AccountID,
-				Message: "Invalid AWS account ID format (must contain only digits)",
-			}
-		}
-	}
-
-	// Validate action field
-	if record.Action != "ACCEPT" && record.Action != "REJECT" {
-		return &ValidationError{
-			Field:   ConvertKeyToAWSFieldName(ActionKey),
-			Actual:  record.Action,
-			Message: "Invalid action value (must be ACCEPT or REJECT)",
-		}
-	}
-
-	// Validate log status
-	if record.LogStatus != "OK" && record.LogStatus != "NODATA" && record.LogStatus != "SKIPDATA" {
-		return &ValidationError{
-			Field:   ConvertKeyToAWSFieldName(LogStatusKey),
-			Actual:  record.LogStatus,
-			Message: "Invalid log status (must be OK, NODATA, or SKIPDATA)",
-		}
-	}
-
-	return nil
-}
-
-// createMetrics creates OpenTelemetry metrics from a VPC flow log record
-func (h *Handler) createMetrics(logRecord *FlowLogRecord) pmetric.Metrics {
-	metrics := pmetric.NewMetrics()
-	rm := metrics.ResourceMetrics().AppendEmpty()
-	rm.SetSchemaUrl(semconv.SchemaURL)
-	rm.Resource().Attributes().PutStr("Name", ResourceName)
-
-	ilms := rm.ScopeMetrics().AppendEmpty()
-	ilms.SetSchemaUrl(semconv.SchemaURL)
-	ilms.Scope().SetName(ScopeName)
-	ilms.Scope().SetVersion(ScopeVersion)
-
-	// Byte Metric
-	byteMetric := ilms.Metrics().AppendEmpty()
-	byteMetric.SetName(BytesMetricName)
-	byteMetric.SetDescription("Bytes transferred in VPC flow logs")
-	byteMetric.SetUnit(BytesUnit)
-	byteMetric.SetEmptyGauge()
-
-	byteDP := byteMetric.Gauge().DataPoints().AppendEmpty()
-
-	byteDP.SetTimestamp(pcommon.NewTimestampFromTime(time.Unix(logRecord.Start, 0)))
-	byteDP.SetIntValue(logRecord.Bytes)
-	h.insertAttributes(&byteDP, logRecord)
-
-	// Packet Metric
-	packetMetric := ilms.Metrics().AppendEmpty()
-	packetMetric.SetName(PacketsMetricName)
-	packetMetric.SetDescription("Packets transferred in VPC flow logs")
-	packetMetric.SetUnit(CountUnit)
-	packetMetric.SetEmptyGauge()
-
-	packetDP := packetMetric.Gauge().DataPoints().AppendEmpty()
-	packetDP.SetTimestamp(pcommon.NewTimestampFromTime(time.Unix(logRecord.Start, 0)))
-	packetDP.SetIntValue(logRecord.Packets)
-	h.insertAttributes(&packetDP, logRecord)
-
-	return metrics
-}
-
-// insertAttributes adds VPC flow log attributes to a metric data point (AWS default format)
-func (h *Handler) insertAttributes(dataPoint *pmetric.NumberDataPoint, logRecord *FlowLogRecord) {
-	// Define a map of string attributes for AWS default format only
-	stringAttributes := map[string]string{
-		VersionKey:      sanitizeAttributeValue(logRecord.Version, MaxAttributeLength),
-		AccountIDKey:    sanitizeAttributeValue(logRecord.AccountID, MaxAttributeLength),
-		InterfaceIDKey:  sanitizeAttributeValue(logRecord.InterfaceID, MaxAttributeLength),
-		SrcAddrKey:      sanitizeAttributeValue(logRecord.SourceAddr, MaxAttributeLength),
-		DstAddrKey:      sanitizeAttributeValue(logRecord.DestinationAddr, MaxAttributeLength),
-		SrcPortKey:      sanitizeAttributeValue(logRecord.SourcePort, MaxAttributeLength),
-		DstPortKey:      sanitizeAttributeValue(logRecord.DestinationPort, MaxAttributeLength),
-		ProtocolKey:     sanitizeAttributeValue(logRecord.Protocol, MaxAttributeLength),
-		ProtocolNameKey: sanitizeAttributeValue(ConvertProtocol(logRecord.Protocol), MaxAttributeLength),
-		ActionKey:       sanitizeAttributeValue(logRecord.Action, MaxAttributeLength),
-		LogStatusKey:    sanitizeAttributeValue(logRecord.LogStatus, MaxAttributeLength),
-	}
-
-	// Insert string attributes
-	for key, value := range stringAttributes {
-		dataPoint.Attributes().PutStr(key, value)
-	}
-
-	// Insert integer attributes for AWS default format
-	dataPoint.Attributes().PutInt(StartKey, logRecord.Start)
-	dataPoint.Attributes().PutInt(EndKey, logRecord.End)
-}
-
-// parseInt64 parses a string to int64, returning 0 on error
-func parseInt64(s string) int64 {
-	i, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
-		handlerLogger.Error("Error parsing integer: ", err.Error())
-		return 0
-	}
-	return i
-}
-
-// sanitizeAttributeValue sanitizes a string value before inserting it as an attribute.
-// It removes control characters, trims long values, and ensures the value is clean and valid for OpenTelemetry.
-func sanitizeAttributeValue(value string, maxLength int) string {
-	// Step 1: Remove any control characters (e.g., non-printable ASCII characters).
-	var sanitized []rune
-	for _, r := range value {
-		if unicode.IsPrint(r) {
-			sanitized = append(sanitized, r)
-		}
-	}
-
-	// Step 2: Trim the string to the maximum allowed length (if necessary).
-	sanitizedStr := string(sanitized)
-	if len(sanitizedStr) > maxLength {
-		sanitizedStr = sanitizedStr[:maxLength]
-	}
-
-	// Return the sanitized value
-	return sanitizedStr
 }

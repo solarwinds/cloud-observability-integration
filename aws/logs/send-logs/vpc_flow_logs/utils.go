@@ -17,7 +17,6 @@ package vpc_flow_logs
 
 import (
 	"strings"
-	"unicode"
 )
 
 // ConvertKeyToAWSFieldName converts OpenTelemetry attribute key constants to AWS VPC Flow Log field names
@@ -45,27 +44,4 @@ func ConvertKeyToAWSFieldName(key string) string {
 		// For other fields, convert underscores to dashes
 		return strings.ReplaceAll(key, "_", "-")
 	}
-}
-
-// isValidAccountID checks if account ID is exactly 12 digits
-func isValidAccountID(accountID string) bool {
-	if len(accountID) != 12 {
-		return false
-	}
-	for _, r := range accountID {
-		if !unicode.IsDigit(r) {
-			return false
-		}
-	}
-	return true
-}
-
-// isValidAction checks if action is ACCEPT or REJECT
-func isValidAction(action string) bool {
-	return action == "ACCEPT" || action == "REJECT"
-}
-
-// isValidLogStatus checks if log status is OK, NODATA, or SKIPDATA
-func isValidLogStatus(logStatus string) bool {
-	return logStatus == "OK" || logStatus == "NODATA" || logStatus == "SKIPDATA"
 }

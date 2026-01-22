@@ -19,14 +19,21 @@
 // This package is organized into the following files:
 //   - constants.go: All constants for field names, attribute keys, and validation values
 //   - types.go: Data structures for VPC Flow Log records
-//   - handler.go: Main handler struct and constructor
+//   - handler.go: Main handler struct and constructor for processing VPC Flow Logs
+//   - processor.go: High-level processor function for processing and exporting metrics via gRPC
 //   - protocol.go: Protocol number to name conversion utilities
 //   - errors.go: Custom error types for parsing and validation
 //   - utils.go: Utility functions for sanitization and validation
-//   - processing.go: Core processing logic for parsing and metrics generation
+//   - memory_cache.go: In-memory cache for VPC Flow Log format strings
+//   - flow_logs_parser.go: Parser for retrieving VPC Flow Log format from AWS EC2
 //
-// Example usage:
+// Example usage from main.go:
 //
-//	handler := vpc_flow_logs.NewHandler(true, 100)
-//	handler.TransformVpcFlowLogs("123456789012", "vpc-logs", "stream1", events, output)
+//	// Initialize handler once (typically in init())
+//	handler := vpc_flow_logs.NewHandler(true, 100, 10*time.Minute)
+//
+//	// Process and export VPC Flow Logs
+//	successCount, errors := vpc_flow_logs.ProcessAndExportVpcFlowLogs(
+//	    ctx, handler, grpcConn, accountID, logGroup, logStream, logEvents,
+//	)
 package vpc_flow_logs

@@ -1,0 +1,62 @@
+# Normalize line endings in repo and enforce consistent checkouts.
+# Defaults: detect text automatically
+* text=auto
+
+# Enforce LF on Unix-y text and Go-related files
+*.go        text eol=lf
+go.mod      text eol=lf
+go.sum      text eol=lf
+go.work     text eol=lf
+
+*.sh        text eol=lf
+Makefile    text eol=lf
+*.mk        text eol=lf
+Dockerfile  text eol=lf
+*.dockerignore text eol=lf
+
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+*.txt       text eol=lf
+*.tf        text eol=lf
+*.tpl       text eol=lf
+
+# Windows scripts should keep CRLF
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+*.ps1       text eol=crlf
+
+# GitHub linguist: mark generated Go and vendored code appropriately
+*.pb.go                 linguist-generated=true
+*.gen.go                linguist-generated=true
+vendor/**               linguist-vendored=true
+
+# Treat common binary assets as binary (no EOL conversions)
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.ico   binary
+*.svg   text
+*.pdf   binary
+*.zip   binary
+*.gz    binary
+*.tar   binary
+*.7z    binary
+*.jar   binary
+*.exe   binary
+*.dll   binary
+*.so    binary
+*.dylib binary
+*.ttf   binary
+*.otf   binary
+*.woff  binary
+*.woff2 binary
+*.mp4   binary
+*.mov   binary
+
+# Exclude VCS metadata from archives
+.gitattributes export-ignore
+.gitignore    export-ignore

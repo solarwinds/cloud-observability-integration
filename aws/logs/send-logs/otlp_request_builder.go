@@ -18,6 +18,8 @@ package main
 import (
 	"regexp"
 
+	"send-logs/scope"
+
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	semconv "go.opentelemetry.io/collector/semconv/v1.5.0"
@@ -261,6 +263,7 @@ func (rb *otlpRequestBuilder) HasHostId() bool {
 func (rb *otlpRequestBuilder) AddLogEntry(itemId string, timestamp int64, message, region string, attributes ...map[string]interface{}) (builder OtlpRequestBuilder) {
 	if rb.instrLogsSlice.Len() == 0 {
 		rb.instrLogs = rb.instrLogsSlice.AppendEmpty()
+		scope.SetInstrumentationScope(rb.instrLogs.Scope())
 	}
 	logEntry := rb.instrLogs.LogRecords().AppendEmpty()
 	logEntry.SetEventName(itemId)
@@ -272,15 +275,13 @@ func (rb *otlpRequestBuilder) AddLogEntry(itemId string, timestamp int64, messag
 		logEntry.Attributes().PutStr(semconv.AttributeCloudRegion, rb.parsedRegion)
 	}
 
-	if attributes != nil {
-		for _, attrs := range attributes {
-			for key, value := range attrs {
-				switch v := value.(type) {
-				case string:
-					logEntry.Attributes().PutStr(key, v)
-				case int:
-					logEntry.Attributes().PutInt(key, int64(v))
-				}
+	for _, attrs := range attributes {
+		for key, value := range attrs {
+			switch v := value.(type) {
+			case string:
+				logEntry.Attributes().PutStr(key, v)
+			case int:
+				logEntry.Attributes().PutInt(key, int64(v))
 			}
 		}
 	}
