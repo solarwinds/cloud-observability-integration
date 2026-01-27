@@ -134,7 +134,7 @@ func TestOltpRequestBuilder(t *testing.T) {
 		matches := detectRegionRegExp.FindStringSubmatch("125229878893_CloudTrail_us-east-2")
 		assert.True(t, len(matches) > 0)
 		i := detectRegionRegExp.SubexpIndex("Region")
-		t.Logf(matches[i])
+		t.Logf("%s", matches[i])
 		//t.Fail()
 	})
 }

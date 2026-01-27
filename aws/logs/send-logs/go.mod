@@ -27,6 +27,4 @@ require (
 
 module send-logs
 
-go 1.23.6
-
-toolchain go1.23.12
+go 1.24.11
