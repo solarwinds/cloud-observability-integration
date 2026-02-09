@@ -1,16 +1,30 @@
-# sendlogs
+# SolarWinds Observability Logs Lambda
 
-This readme provides a brief explanation of what is included in the project:
+This AWS Lambda function forwards CloudWatch Logs to SolarWinds Observability using the OTLP/gRPC protocol. It supports both standard CloudWatch logs and VPC Flow Logs with custom format parsing.
+
+## Project Structure
 
 ```bash
 .
 ├── README.md                   <-- This instructions file
-├── send-logs                   <-- Source code for a lambda function
+├── send-logs/                  <-- Source code for the lambda function
 │   ├── go.mod                  <-- Go dependency definitions
-|   ├── go.sum                  <-- Go dependency checksums
-│   ├── main.go                 <-- Lambda function code
-│   ├── logger
-│       ├── logger.go           <-- Simple logger utility library
+│   ├── go.sum                  <-- Go dependency checksums
+│   ├── main.go                 <-- Lambda function entry point
+│   ├── main_test.go            <-- Main function tests
+│   ├── otlp_request_builder.go <-- OTLP message builder
+│   ├── otlp_request_builder_test.go
+│   ├── logger/                 <-- Logger utility library
+│   │   └── logger.go
+│   ├── scope/                  <-- Instrumentation scope definitions
+│   │   └── instrumentation_scope.go
+│   ├── vpc_flow_logs/          <-- VPC Flow Logs parsing module
+│   │   ├── handler.go          <-- Main VPC handler
+│   │   ├── flow_logs_parser.go <-- Flow log parsing logic
+│   │   ├── config.go           <-- Configuration
+│   │   ├── types.go            <-- Type definitions
+│   │   └── ...                 <-- Additional modules
+│   └── testdata/               <-- Test fixtures
 └── template.yaml               <-- AWS SAM deployment template
 ```
 
@@ -27,10 +41,28 @@ Golang is a statically compiled language. This means that to run it, you have to
 
 ### Configuration
 
-The lambda function requires the following environment variables to be set:
-* `USE_ENCRYPTION` - tells the function to decrypt environmental variables (default is `yes`, clear to turn off the encryption)
-* `OTLP_ENDPOINT` - OTEL Collector logs receiver endpoint
-* `API_TOKEN` - SolarWinds API token generated for the customer
+The lambda function supports the following environment variables:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `OTLP_ENDPOINT` | Yes | `otel.collector.na-01.cloud.solarwinds.com:443` | SolarWinds OTEL Collector endpoint |
+| `API_TOKEN` | Yes | - | SolarWinds API token for authentication |
+| `USE_ENCRYPTION` | No | `yes` | Set to `no` to disable KMS decryption of environment variables |
+| `VPC_LOG_GROUP_NAME` | No | - | CloudWatch log group name for VPC Flow Logs (enables VPC parsing) |
+| `LOG_LEVEL` | No | `INFO` | Logging level (`DEBUG`, `INFO`, `WARN`, `ERROR`) |
+| `VPC_DEBUG_INTERVAL` | No | `100` | Interval for VPC debug logging (every N records) |
+
+### VPC Flow Logs Support
+
+To enable VPC Flow Logs parsing:
+
+1. Create a CloudWatch Logs trigger for your VPC Flow Logs log group (or create a subscription filter pointing to this Lambda) - this is required to forward logs to the Lambda
+2. Set the `VPC_LOG_GROUP_NAME` environment variable to the exact name of your VPC Flow Logs CloudWatch log group
+3. The Lambda will detect when incoming logs are from the VPC log group and apply special parsing logic
+
+The `VPC_LOG_GROUP_NAME` variable tells the Lambda *how to process* logs from that log group (as VPC Flow Logs with enrichment), but it does **not** create the subscription. You must configure the CloudWatch trigger separately.
+
+The parser supports both default AWS VPC Flow Log format and custom formats with additional fields.
 
 ### Testing
 
@@ -127,7 +159,7 @@ The packaging command uploads the lambda function build artifacts to S3 store an
 The publishing command deploys the `packaged.yaml` application manifest to the private section of Serverless Application Repository from which it can be deployed to the AWS account or eventually made public. 
 # Appendix
 
-### Golang installation
+## Golang installation
 
 Please ensure that Go 1.x (where 'x' is the latest version) is installed using the instructions on the official golang website: https://golang.org/doc/install
 

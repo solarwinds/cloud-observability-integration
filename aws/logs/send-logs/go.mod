@@ -4,6 +4,7 @@ require (
 	github.com/stretchr/testify v1.10.0
 	go.opentelemetry.io/collector/pdata v1.38.0
 	go.opentelemetry.io/collector/semconv v0.128.0
+	golang.org/x/net v0.43.0 // indirect
 	google.golang.org/grpc v1.75.0
 )
 
@@ -17,7 +18,6 @@ require (
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/net v0.43.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250818200422-3122310a409c // indirect
@@ -27,6 +27,4 @@ require (
 
 module send-logs
 
-go 1.23.6
-
-toolchain go1.23.12
+go 1.24.11

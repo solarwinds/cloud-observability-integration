@@ -17,18 +17,46 @@ package vpc_flow_logs
 
 // FlowLogRecord represents an AWS VPC Flow Log record (default format)
 type FlowLogRecord struct {
-	Version         string `json:"version"`      // Field 0: VPC Flow Log version
-	AccountID       string `json:"account-id"`   // Field 1: AWS account ID
-	InterfaceID     string `json:"interface-id"` // Field 2: Network interface ID
-	SourceAddr      string `json:"srcaddr"`      // Field 3: Source IP address
-	DestinationAddr string `json:"dstaddr"`      // Field 4: Destination IP address
-	SourcePort      string `json:"srcport"`      // Field 5: Source port
-	DestinationPort string `json:"dstport"`      // Field 6: Destination port
-	Protocol        string `json:"protocol"`     // Field 7: Protocol number
-	Packets         int64  `json:"packets"`      // Field 8: Number of packets
-	Bytes           int64  `json:"bytes"`        // Field 9: Number of bytes
-	Start           int64  `json:"start"`        // Field 10: Window start time (Unix seconds)
-	End             int64  `json:"end"`          // Field 11: Window end time (Unix seconds)
-	Action          string `json:"action"`       // Field 12: ACCEPT or REJECT
-	LogStatus       string `json:"log-status"`   // Field 13: OK, NODATA, or SKIPDATA
+	Version                 string `json:"version"`                    // VPC Flow Log version
+	AccountID               string `json:"account-id"`                 // AWS account ID
+	InterfaceID             string `json:"interface-id"`               // Network interface ID
+	SrcAddr                 string `json:"srcaddr"`                    // Source IP address
+	DstAddr                 string `json:"dstaddr"`                    // Destination IP address
+	SrcPort                 string `json:"srcport"`                    // Source port
+	DstPort                 string `json:"dstport"`                    // Destination port
+	Protocol                string `json:"protocol"`                   // Protocol number
+	Packets                 int64  `json:"packets"`                    // Number of packets
+	Bytes                   int64  `json:"bytes"`                      // Number of bytes
+	Start                   int64  `json:"start"`                      // Window start time (Unix seconds)
+	End                     int64  `json:"end"`                        // Window end time (Unix seconds)
+	Action                  string `json:"action"`                     // ACCEPT or REJECT
+	LogStatus               string `json:"log-status"`                 // OK, NODATA, or SKIPDATA
+	VpcID                   string `json:"vpc-id"`                     // VPC ID where the network interface resides
+	SubnetID                string `json:"subnet-id"`                  // Subnet ID where the network interface resides
+	InstanceID              string `json:"instance-id"`                // Instance ID associated with the network interface
+	TcpFlags                string `json:"tcp-flags"`                  // Bitmask value for TCP flags
+	Type                    string `json:"type"`                       // Type of traffic (IPv4, IPv6, EFA)
+	PktSrcAddr              string `json:"pkt-srcaddr"`                // Packet-level source IP address
+	PktDstAddr              string `json:"pkt-dstaddr"`                // Packet-level destination IP address
+	Region                  string `json:"region"`                     // AWS region where the network interface resides
+	AzID                    string `json:"az-id"`                      // Availability Zone ID where the network interface resides
+	SublocationType         string `json:"sublocation-type"`           // Type of sublocation (wavelength, outpost, localzone)
+	SublocationID           string `json:"sublocation-id"`             // ID of the sublocation
+	PktSrcAWSService        string `json:"pkt-src-aws-service"`        // Name of AWS service that's the packet-level source
+	PktDstAWSService        string `json:"pkt-dst-aws-service"`        // Name of AWS service that's the packet-level destination
+	FlowDirection           string `json:"flow-direction"`             // Direction of flow relative to the interface (ingress/egress)
+	TrafficPath             string `json:"traffic-path"`               // Path traffic takes from source to destination
+	ECSClusterName          string `json:"ecs-cluster-name"`           // Name of the ECS cluster
+	ECSClusterArn           string `json:"ecs-cluster-arn"`            // ARN of the ECS cluster
+	ECSContainerInstanceID  string `json:"ecs-container-instance-id"`  // ID of the ECS container instance
+	ECSContainerInstanceArn string `json:"ecs-container-instance-arn"` // ARN of the ECS container instance
+	ECSServiceName          string `json:"ecs-service-name"`           // Name of the ECS service
+	ECSTaskDefinitionArn    string `json:"ecs-task-definition-arn"`    // ARN of the ECS task definition
+	ECSTaskID               string `json:"ecs-task-id"`                // ID of the ECS task
+	ECSTaskArn              string `json:"ecs-task-arn"`               // ARN of the ECS task
+	ECSContainerID          string `json:"ecs-container-id"`           // ID of the first ECS container
+	ECSSecondContainerID    string `json:"ecs-second-container-id"`    // ID of the second ECS container (if applicable)
+	RejectReason            string `json:"reject-reason"`              // Reason the traffic was rejected (if action is REJECT)
+	ResourceID              string `json:"resource-id"`                // Resource ID (e.g., NAT gateway ID) - Available in v9+
+	EncryptionStatus        string `json:"encryption-status"`          // Encryption status of the traffic - Available in v10+
 }

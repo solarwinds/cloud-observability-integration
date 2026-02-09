@@ -13,40 +13,25 @@
 * under the License.
  */
 
-package logger
+package scope
 
 import (
-	"log"
-	"os"
+	"go.opentelemetry.io/collector/pdata/pcommon"
 )
 
-type Logger interface {
-	Info(v ...interface{})
-	Error(v ...interface{})
-	Fatal(v ...interface{})
-}
+const (
+	// Telemetry scope
+	ScopeName    = "vpc_flow_logs"
+	ScopeVersion = "1.0.0"
+	Identifier   = "nio"
+	SwiReporter  = ""
+)
 
-type logger struct {
-	infoLogger  log.Logger
-	errorLogger log.Logger
-}
-
-func (l *logger) Info(v ...interface{}) {
-	l.infoLogger.Println(v...)
-}
-
-func (l *logger) Error(v ...interface{}) {
-	l.infoLogger.Println(v...)
-}
-
-func (l *logger) Fatal(v ...interface{}) {
-	l.Error(v...)
-	os.Exit(1)
-}
-
-func NewLogger(prefix string) Logger {
-	return &logger{
-		infoLogger:  *log.New(log.Writer(), prefix+" INFO ", log.Lmsgprefix),
-		errorLogger: *log.New(log.Writer(), prefix+" ERROR ", log.Lmsgprefix),
-	}
+// SetInstrumentationScope sets the instrumentation scope name, version, and attributes
+// This is used for both logs and metrics to ensure consistency
+func SetInstrumentationScope(scope pcommon.InstrumentationScope) {
+	scope.SetName(ScopeName)
+	scope.SetVersion(ScopeVersion)
+	scope.Attributes().PutStr("identifier", Identifier)
+	scope.Attributes().PutStr("swi-reporter", SwiReporter)
 }

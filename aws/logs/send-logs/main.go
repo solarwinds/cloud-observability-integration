@@ -24,7 +24,6 @@ import (
 	"regexp"
 	"send-logs/logger"
 	"send-logs/vpc_flow_logs"
-	"strconv"
 	"strings"
 
 	"encoding/base64"
@@ -37,8 +36,6 @@ import (
 	"github.com/aws/aws-sdk-go/service/kms"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
-	"go.opentelemetry.io/collector/pdata/pmetric"
-	"go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
@@ -59,9 +56,6 @@ const (
 	apiTokenVar              = "API_TOKEN"
 	useEncryptionVar         = "USE_ENCRYPTION"
 	timestampMultiplier      = 1000000 // AWS Logs timestamp is in millisends since Jan 1 , 1970, OTEL Collector timestamp is in nanoseconds
-	vpcLogGroupName          = "VPC_LOG_GROUP_NAME"
-	logLevel                 = "LOG_LEVEL"
-	vpcDebugInterval         = "VPC_DEBUG_INTERVAL" // How often to log full JSON (every Nth record)
 )
 
 var (
@@ -75,13 +69,11 @@ var (
 	apiToken                    string = os.Getenv(apiTokenVar)     // encrypted when AWS_EXECUTION_ENV contains 'AWS_Lambda_'
 	appLogger                          = logger.NewLogger("send-logs")
 	kmsClient                   *kms.KMS
-	detectInstanceNameAndRegion        = regexp.MustCompile(`(?P<Fargate>(fargate-))?(?P<Instance>(i-|ip-)[\w\-]+)\.(?P<Region>[\w\-]+)\.`)
-	instanceParamIndex                 = detectInstanceNameAndRegion.SubexpIndex("Instance")
-	regionParamIndex                   = detectInstanceNameAndRegion.SubexpIndex("Region")
-	fargateParamIndex                  = detectInstanceNameAndRegion.SubexpIndex("Fargate")
-	vpcLogGrpName               string = os.Getenv(vpcLogGroupName)
-	isDebugEnabled              bool   = strings.EqualFold(os.Getenv(logLevel), "DEBUG")
-	vpcDebugIntervalValue       int    = getVpcDebugInterval()
+	detectInstanceNameAndRegion = regexp.MustCompile(`(?P<Fargate>(fargate-))?(?P<Instance>(i-|ip-)[\w\-]+)\.(?P<Region>[\w\-]+)\.`)
+	instanceParamIndex          = detectInstanceNameAndRegion.SubexpIndex("Instance")
+	regionParamIndex            = detectInstanceNameAndRegion.SubexpIndex("Region")
+	fargateParamIndex           = detectInstanceNameAndRegion.SubexpIndex("Fargate")
+	vpcConfig                   *vpc_flow_logs.Config // VPC Flow Logs configuration (initialized in init())
 )
 
 type cloudTrailEvent struct {
@@ -160,12 +152,15 @@ func init() {
 	if !useEncryption {
 		// not depolyed to AWS or USE_ENCRYPTION != yes, skip decryption
 		appLogger.Info("Skipping parameter decryption.")
-		return
+	} else {
+		kmsClient = kms.New(session.New())
+		endpoint = decodeString(endpoint)
+		apiToken = decodeString(apiToken)
 	}
 
-	kmsClient = kms.New(session.New())
-	endpoint = decodeString(endpoint)
-	apiToken = decodeString(apiToken)
+	// Initialize VPC Flow Logs configuration and handler ONCE at startup
+	// This follows AWS Lambda best practices - allows in-memory cache to persist across invocations
+	vpcConfig = vpc_flow_logs.InitializeFromEnv()
 }
 
 func decodeString(encrypted string) string {
@@ -187,35 +182,6 @@ func decodeString(encrypted string) string {
 	return string(response.Plaintext[:])
 }
 
-// getVpcDebugInterval parses the VPC_DEBUG_INTERVAL environment variable
-// Returns a safe default of 100 if not set or invalid
-func getVpcDebugInterval() int {
-	intervalStr := os.Getenv(vpcDebugInterval)
-	if intervalStr == "" {
-		return 100 // Default: log full JSON every 100th record
-	}
-
-	interval, err := strconv.Atoi(intervalStr)
-	if err != nil {
-		appLogger.Error(fmt.Sprintf("VPC_DEBUG_INTERVAL: unable to parse '%s' as number, using default 100", intervalStr))
-		return 100
-	}
-
-	// Check boundary conditions with specific error messages
-	if interval < 1 {
-		appLogger.Error(fmt.Sprintf("VPC_DEBUG_INTERVAL can't be less than 1, got %d, using default 100", interval))
-		return 100
-	}
-
-	// Set reasonable upper bounds
-	if interval > 10000 {
-		appLogger.Error(fmt.Sprintf("VPC_DEBUG_INTERVAL too large (max 10000), got %d, capping at 10000", interval))
-		return 10000
-	}
-
-	return interval
-}
-
 func extractEC2InstanceId(ec2Event *ec2CloudTrailEvent) (instanceId string, err error) {
 	if len(ec2Event.RequestParameters.InstancesSet.Items) > 0 {
 		instanceId = ec2Event.RequestParameters.InstancesSet.Items[0].InstanceId
@@ -230,7 +196,7 @@ func extractEC2InstanceId(ec2Event *ec2CloudTrailEvent) (instanceId string, err 
 			return
 		}
 	}
-	err = errors.New("Instance Id is not present")
+	err = errors.New("instance id is not present")
 	return
 }
 
@@ -256,29 +222,29 @@ func handleEvent(ctx context.Context, event events.CloudwatchLogsEvent) (r strin
 		return r, err
 	}
 
-	defer conn.Close()
+	defer func() {
+		if closeErr := conn.Close(); closeErr != nil {
+			appLogger.Error("Error closing connection: ", closeErr.Error())
+		}
+	}()
 
 	errs := make([]error, 0)
+	successfulExports := 0
 	ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+apiToken)
 
-	// Check if this is a VPC log group
-	if datareq.LogGroup == vpcLogGrpName {
-		// Process VPC flow logs as metrics
-		metricsClient := pmetricotlp.NewGRPCClient(conn)
-		vpcLogChan := make(chan pmetric.Metrics)
-
-		// process VPC flow logs using the handler with channel pattern
-		vpcHandler := vpc_flow_logs.NewHandler(isDebugEnabled, vpcDebugIntervalValue)
-		go vpcHandler.TransformVpcFlowLogs(datareq.Owner, datareq.LogGroup, datareq.LogStream, datareq.LogEvents, vpcLogChan)
-
-		for processedMetric := range vpcLogChan {
-			metricRequest := pmetricotlp.NewExportRequestFromMetrics(processedMetric)
-			_, err := metricsClient.Export(ctx, metricRequest)
-			if err != nil {
-				appLogger.Error("While exporting metric data: ", err.Error())
-				errs = append(errs, err)
-			}
-		}
+	// Check if this is a VPC Flow Logs log group
+	if vpcConfig.ShouldProcess(datareq.LogGroup) {
+		// Process VPC flow logs as metrics using the vpc_flow_logs package
+		// The VPC handler is initialized once in init() and reused across invocations (AWS Lambda best practice)
+		successfulExports, errs = vpc_flow_logs.ProcessAndExportVpcFlowLogs(
+			ctx,
+			vpcConfig.Handler,
+			conn,
+			datareq.Owner,
+			datareq.LogGroup,
+			datareq.LogStream,
+			datareq.LogEvents,
+		)
 	} else {
 		// Process regular logs
 		logsClient := plogotlp.NewGRPCClient(conn)
@@ -292,15 +258,19 @@ func handleEvent(ctx context.Context, event events.CloudwatchLogsEvent) (r strin
 			if err != nil {
 				appLogger.Error("While exporting log data: ", err.Error())
 				errs = append(errs, err)
+			} else {
+				successfulExports++
 			}
 		}
 	}
+
 	if len(errs) == 0 {
 		r = "success"
+		appLogger.Info(fmt.Sprintf("Function execution result: %s (%d records exported)", r, successfulExports))
 	} else {
 		err = errs[len(errs)-1]
+		appLogger.Error(fmt.Sprintf("Function execution result: %s (%d records exported, %d errors)", r, successfulExports, len(errs)))
 	}
-	appLogger.Info("Function execution result: ", r)
 
 	return r, err
 }
@@ -552,7 +522,7 @@ func (evt *cloudInsightsAppLog) getInstanceId() (result string, err error) {
 	result = evt.parsedInstanceId
 	if result == "" {
 		// most likely Fargate instance
-		err = errors.New("Instance Id is not present")
+		err = errors.New("instance id is not present")
 	}
 	return
 }
@@ -597,7 +567,7 @@ func (evt *cloudInsightsPerformance) getEventType() (result string) {
 
 func (evt *cloudTrailEvent) getInstanceId() (result string, err error) {
 	result = ""
-	err = errors.New("Event doesn't contain EC2 Instance ID")
+	err = errors.New("event doesn't contain EC2 instance ID")
 	return
 }
 
