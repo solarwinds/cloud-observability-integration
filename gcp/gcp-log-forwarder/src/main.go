@@ -20,6 +20,12 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// Batching Constraints
+const (
+	MaxBatchRecords = 500             // Safe record count for heavy logs
+	MaxBatchBytes   = 3 * 1024 * 1024 // 3MB target to stay well under the 413 limit
+)
+
 var (
 	httpClient    *http.Client
 	storageClient *storage.Client
@@ -27,20 +33,28 @@ var (
 	gzPool        = sync.Pool{New: func() any { return gzip.NewWriter(nil) }}
 )
 
+// serviceBatch tracks state for multiple services found in a single GCS file
+type serviceBatch struct {
+	records []map[string]any
+	size    int
+}
+
 func init() {
+	// Initialize HTTP Client with production timeouts
 	httpClient = &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: 45 * time.Second,
 		Transport: &http.Transport{
 			MaxIdleConns:        100,
-			MaxIdleConnsPerHost: 100,
 			IdleConnTimeout:     90 * time.Second,
+			TLSHandshakeTimeout: 10 * time.Second,
 		},
 	}
 
+	// Initialize Storage Client once at startup
 	var err error
 	storageClient, err = storage.NewClient(context.Background())
 	if err != nil {
-		log.Fatalf("Failed to create storage client: %v", err)
+		log.Fatalf("failed to create storage client: %v", err)
 	}
 
 	functions.CloudEvent("HandleGcsBatch", HandleGcsBatch)
@@ -68,22 +82,38 @@ func HandleGcsBatch(ctx context.Context, e event.Event) error {
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
 
 	g, ctx := errgroup.WithContext(ctx)
-	batches := make(map[string][]map[string]any)
+	batches := make(map[string]*serviceBatch)
+
+	flush := func(svc string, b *serviceBatch) {
+		currentRecords, currentSvc := b.records, svc
+		g.Go(func() error {
+			return sendToSolarWinds(ctx, swiURL, swiToken, currentSvc, currentRecords)
+		})
+		b.records = nil
+		b.size = 0
+	}
 
 	for scanner.Scan() {
+		line := scanner.Bytes()
 		var raw map[string]any
-		if err := json.Unmarshal(scanner.Bytes(), &raw); err != nil {
+		if err := json.Unmarshal(line, &raw); err != nil {
 			continue
 		}
 
-		serviceName := getServiceName(raw)
-		record := transformToOTLP(raw, data.Name)
-		batches[serviceName] = append(batches[serviceName], record)
+		svcName := getServiceName(raw)
+		if _, ok := batches[svcName]; !ok {
+			batches[svcName] = &serviceBatch{}
+		}
 
-		if len(batches[serviceName]) >= 1000 {
-			svc, batch := serviceName, batches[serviceName]
-			g.Go(func() error { return sendToSolarWinds(ctx, swiURL, swiToken, svc, batch) })
-			batches[serviceName] = nil
+		record := transformToOTLP(raw, data.Name)
+
+		b := batches[svcName]
+		b.records = append(b.records, record)
+		// Estimate bloat: OTLP JSON wrapping adds significant overhead
+		b.size += int(float64(len(line)) * 2.5)
+
+		if len(b.records) >= MaxBatchRecords || b.size >= MaxBatchBytes {
+			flush(svcName, b)
 		}
 	}
 
@@ -91,52 +121,71 @@ func HandleGcsBatch(ctx context.Context, e event.Event) error {
 		return fmt.Errorf("error reading GCS file: %w", err)
 	}
 
-	for svc, batch := range batches {
-		if len(batch) > 0 {
-			s, b := svc, batch
-			g.Go(func() error { return sendToSolarWinds(ctx, swiURL, swiToken, s, b) })
+	// Final flush for remaining logs
+	for svc, b := range batches {
+		if len(b.records) > 0 {
+			flush(svc, b)
 		}
 	}
 
 	return g.Wait()
 }
 
+// transformToOTLP maps GCP fields to the OTLP schema
 func transformToOTLP(raw map[string]any, fileName string) map[string]any {
-	tsNano := fmt.Sprintf("%d", time.Now().UnixNano())
-	for _, key := range []string{"timestamp", "time", "receiveTimestamp"} {
-		if val, ok := raw[key].(string); ok && val != "" {
-			if parsed, err := time.Parse(time.RFC3339, val); err == nil {
-				tsNano = fmt.Sprintf("%d", parsed.UnixNano())
-				break
+	var bodyText string
+
+	// 1. Audit Logs (protoPayload)
+	if pp, ok := raw["protoPayload"].(map[string]any); ok {
+		// Serialize the entire protoPayload directly to the body
+		jb, _ := json.Marshal(pp)
+		bodyText = string(jb)
+	}
+
+	// 2. Structured Logs (jsonPayload)
+	if bodyText == "" {
+		if jp, ok := raw["jsonPayload"].(map[string]any); ok {
+			if msg, ok := jp["message"].(string); ok {
+				bodyText = msg
+			} else {
+				// Serialize the whole jsonPayload
+				jb, _ := json.Marshal(jp)
+				bodyText = string(jb)
 			}
 		}
 	}
 
-	severity := "INFO"
-	if s, ok := raw["severity"].(string); ok {
-		severity = s
+	// 3. Simple Text Logs
+	if bodyText == "" {
+		if tp, ok := raw["textPayload"].(string); ok {
+			bodyText = tp
+		}
+	}
+
+	// Final Fallback
+	if bodyText == "" {
+		bodyText = "GCP Log Entry"
 	}
 
 	return map[string]any{
-		"timeUnixNano":   tsNano,
-		"severityNumber": mapSeverity(severity),
-		"severityText":   severity,
-		"body":           recursiveMap(raw),
+		"timeUnixNano":   fmt.Sprintf("%d", time.Now().UnixNano()),
+		"severityNumber": mapSeverity(fmt.Sprintf("%v", raw["severity"])),
+		"severityText":   fmt.Sprintf("%v", raw["severity"]),
+		"body":           map[string]any{"stringValue": bodyText},
 		"attributes": []map[string]any{
 			{"key": "gcs.file_source", "value": map[string]any{"stringValue": fileName}},
+			{"key": "log.metadata", "value": recursiveMap(raw)},
 		},
 	}
 }
 
 func sendToSolarWinds(ctx context.Context, url, token, serviceName string, records []map[string]any) error {
-
 	payload := map[string]any{
 		"resourceLogs": []map[string]any{{
 			"resource": map[string]any{
 				"attributes": []map[string]any{
 					{"key": "service.name", "value": map[string]any{"stringValue": serviceName}},
 					{"key": "cloud.provider", "value": map[string]any{"stringValue": "gcp"}},
-					{"key": "telemetry.sdk.name", "value": map[string]any{"stringValue": "gcp-log-forwarder"}},
 				},
 			},
 			"scopeLogs": []map[string]any{{"logRecords": records}},
@@ -167,7 +216,7 @@ func sendToSolarWinds(ctx context.Context, url, token, serviceName string, recor
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("solarwinds error: %d", resp.StatusCode)
+		return fmt.Errorf("SolarWinds error: %d for service %s", resp.StatusCode, serviceName)
 	}
 	return nil
 }
@@ -186,12 +235,6 @@ func recursiveMap(v any) map[string]any {
 			arr = append(arr, recursiveMap(item))
 		}
 		return map[string]any{"arrayValue": map[string]any{"values": arr}}
-	case int, int64:
-		return map[string]any{"intValue": val}
-	case float64:
-		return map[string]any{"doubleValue": val}
-	case bool:
-		return map[string]any{"boolValue": val}
 	default:
 		return map[string]any{"stringValue": fmt.Sprintf("%v", val)}
 	}
@@ -200,9 +243,9 @@ func recursiveMap(v any) map[string]any {
 func getServiceName(raw map[string]any) string {
 	if ln, ok := raw["logName"].(string); ok {
 		parts := strings.Split(ln, "/")
-		lastPart := parts[len(parts)-1]
-		if lastPart != "syslog" && lastPart != "activity" {
-			return lastPart
+		last := parts[len(parts)-1]
+		if !strings.Contains(last, "syslog") && !strings.Contains(last, "activity") {
+			return last
 		}
 	}
 	if res, ok := raw["resource"].(map[string]any); ok {
@@ -210,7 +253,7 @@ func getServiceName(raw map[string]any) string {
 			return t
 		}
 	}
-	return "gcp-service-unknown"
+	return "gcp-unknown-service"
 }
 
 func mapSeverity(s string) int {
