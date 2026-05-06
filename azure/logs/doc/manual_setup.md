@@ -33,7 +33,8 @@ Azure function apps have built-in triggers for Event Hub. When the triggers are 
 - From the Azure portal menu or the Home page, select Create a resource.
 - In the New page, select Compute > Function App.
 - On the Basics page, use the function app settings: Subscription, Resource Group, Region, and Function App name.
-- Select **Publish to Code, .NET as Runtime stack and Version 6**.
+- Select App Service
+- Select **Publish to Code, .NET as Runtime stack and Version 8 (in Process)**.
 - Select **operating system Windows**, and serverless plan type.
 - Select Next:Hosting.
 - Select a storage account.
