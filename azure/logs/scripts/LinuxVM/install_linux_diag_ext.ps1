@@ -55,7 +55,7 @@ $HMAC.key = [Text.Encoding]::ASCII.GetBytes($eventHubAccessPolicyKey)
 $Signature = $HMAC.ComputeHash([Text.Encoding]::ASCII.GetBytes($SignatureString))
 $Signature = [Convert]::ToBase64String($Signature)
 $token = "sr=" + [System.Web.HttpUtility]::UrlEncode($eventHubUri) + "&sig=" + [System.Web.HttpUtility]::UrlEncode($Signature) + "&se=" + $Expires + "&skn=" + $eventHubPolicyName
-$sasUrl = "https://" + $eventHubUri + '?' + $token
+$sasUrl = $eventHubUri + '?' + $token
 
 # Generate a SAS token for the agent to authenticate with the storage account
 $sasToken = New-AzStorageAccountSASToken -Service Blob,Table -ResourceType Service,Container,Object -Permission "racwdlup" -Context (Get-AzStorageAccount -ResourceGroupName $storageAccountResourceGroup -AccountName $storageAccountName).Context -ExpiryTime $([System.DateTime]::Now.AddYears(2))
